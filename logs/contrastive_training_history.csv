@@ -1,0 +1,4 @@
+epoch,train_loss,val_loss,lr,duration_sec,is_best
+1,0.2841,0.2177,0.0005,61.3,True
+2,0.2132,0.1898,0.0005,62.0,True
+3,0.1809,0.1613,0.0005,61.4,True

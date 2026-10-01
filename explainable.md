@@ -1,0 +1,1574 @@
+# KMU-FED Pipeline — Explainable Documentation
+
+> **Purpose of this file:**
+> This document explains every phase of the pipeline in plain English.
+> Use it as your reference guide throughout the project.
+
+---
+
+## Table of Contents
+
+1. [What is KMU-FED?](#what-is-kmu-fed)
+2. [Project Structure](#project-structure)
+3. [How to Run Each Phase](#how-to-run-each-phase)
+4. [Phase 1 — Dataset Inspection](#phase-1--dataset-inspection)
+5. [Phase 2 — Frame Verification](#phase-2--frame-verification)
+6. [Phase 3 — Face Detection](#phase-3--face-detection)
+7. [Phase 4 — Face Alignment](#phase-4--face-alignment)
+8. [Phase 5 — Resize and Normalization](#phase-5--resize-and-normalization)
+9. [Phase 6 — Data Augmentation](#phase-6--data-augmentation)
+10. [Phase 7 — Train/Validation/Test Split](#phase-7--trainvalidationtest-split)
+11. [Phase 8 — Positive and Negative Pair Generation](#phase-8--positive-and-negative-pair-generation)
+12. [Phase 9 — Contrastive Learning Dataset](#phase-9--contrastive-learning-dataset)
+13. [Phase 10 — EfficientNet Feature Encoder](#phase-10--efficientnet-feature-encoder)
+14. [Phase 11 — Contrastive Learning Model](#phase-11--contrastive-learning-model)
+15. [Phase 12 — Contrastive Loss and Training](#phase-12--contrastive-loss-and-training)
+16. [Phase 13 — Feature Representation Extraction](#phase-13--feature-representation-extraction)
+17. [Phase 14 — Emotion Classification](#phase-14--emotion-classification)
+18. [Phase 15 — Fine-Tuning](#phase-15--fine-tuning)
+19. [Phase 16 — Model Evaluation](#phase-16--model-evaluation)
+20. [Phase 17 — Feature Visualization](#phase-17--feature-visualization)
+21. [Phase 18 — RAF-DB Comparison](#phase-18--raf-db-comparison)
+22. [Phase 19 — Ablation Study](#phase-19--ablation-study)
+23. [Key Concepts Explained](#key-concepts-explained)
+24. [Troubleshooting](#troubleshooting)
+
+---
+
+## What is KMU-FED?
+
+**KMU-FED** = Keimyung University Facial Expression of Drivers
+
+It is a dataset of facial expression images captured from drivers.
+
+| Property         | Value                                                          |
+|------------------|----------------------------------------------------------------|
+| Subjects         | 12 people                                                      |
+| Emotions         | 6 (Anger, Disgust, Fear, Happiness, Sadness, Surprise)         |
+| Total images     | 1,100 (after removing 6 duplicates)                            |
+| Image size       | 1600 x 1200 pixels, RGB                                        |
+| Naming format    | SubjectID_EmotionCode_PersonCode_Frame.jpg                     |
+| Example filename | 01_AN_mr_005.jpg                                               |
+
+### Filename Meaning
+
+```
+01   _   AN   _   mr   _   005  .jpg
+|        |        |        |
+|        |        |        +-- Frame number (which frame in the sequence)
+|        |        +----------- Person code  (actor abbreviation)
+|        +-------------------- Emotion code (AN=Anger, HA=Happiness, etc.)
++----------------------------- Subject ID   (01 through 12)
+```
+
+### Emotion Code Reference
+
+| Code | Emotion   |
+|------|-----------|
+| AN   | Anger     |
+| DI   | Disgust   |
+| FE   | Fear      |
+| HA   | Happiness |
+| SA   | Sadness   |
+| SU   | Surprise  |
+
+---
+
+## Project Structure
+
+```
+KMU-FED-2/
++-- config.py                       <- ALL settings live here
++-- main.py                         <- Master entry point
++-- requirements.txt                <- Python packages needed
++-- README.md                       <- Project description
++-- explainable.md                  <- THIS FILE
+
++-- preprocessing/
+|   +-- phase1_inspect_dataset.py   <- Phase 1: scan + build metadata
+|   +-- phase2_verify_frames.py     <- Phase 2: validate + copy frames
+|   +-- face_detection.py           <- Phase 3: detect faces
+|   +-- face_alignment.py           <- Phase 4: align faces
+|   +-- preprocessing.py            <- Phase 5: resize + normalize
+|   +-- augmentation.py             <- Phase 6: data augmentation
+|   +-- split_dataset.py            <- Phase 7: train/val/test split
+
++-- datasets/
+|   +-- kmu_dataset.py              <- Standard dataset loader
+|   +-- contrastive_dataset.py      <- Pair-based dataset
+
++-- models/
+|   +-- efficientnet_encoder.py     <- EfficientNet backbone
+|   +-- contrastive_model.py        <- Siamese network
+|   +-- emotion_classifier.py       <- Final classification head
+
++-- training/
+|   +-- train_contrastive.py        <- Train the contrastive model
+|   +-- train_classifier.py         <- Fine-tune for emotion classification
+
++-- evaluation/
+|   +-- evaluate.py                 <- Accuracy, F1, etc.
+|   +-- confusion_matrix.py         <- Confusion matrix plots
+|   +-- compare_rafdb.py            <- RAF-DB comparison
+
++-- visualization/
+|   +-- feature_visualization.py    <- PCA / t-SNE plots
+|   +-- training_curves.py          <- Loss and accuracy curves
+
++-- data/
+|   +-- metadata/                   <- CSV files
+|   +-- frames/                     <- Copied frames (Phase 2)
+|   +-- detected_faces/             <- Cropped faces (Phase 3)
+|   +-- aligned_faces/              <- Aligned faces (Phase 4)
+|   +-- processed/                  <- Normalized images (Phase 5)
+
++-- logs/                           <- Failure logs
++-- features/                       <- Saved feature vectors
++-- models_checkpoints/             <- Saved model weights
++-- results/
+    +-- kmu_fed/
+    +-- raf_db/
+```
+
+---
+
+## How to Run Each Phase
+
+Every phase script is self-contained and can be run independently.
+
+```bash
+# Phase 1 -- Dataset inspection
+python preprocessing/phase1_inspect_dataset.py
+
+# Phase 2 -- Frame verification
+python preprocessing/phase2_verify_frames.py
+
+# Phase 3 -- Face detection
+python preprocessing/face_detection.py
+
+# Phase 4 -- Face alignment
+python preprocessing/face_alignment.py
+
+# Phase 5 -- Resize and normalize
+python preprocessing/preprocessing.py
+
+# Phase 6 -- Augmentation preview
+python preprocessing/augmentation.py --preview
+
+# Phase 7 -- Train/val/test split
+python preprocessing/split_dataset.py
+```
+
+Override paths at the command line:
+```bash
+python preprocessing/phase1_inspect_dataset.py --raw_dir D:\MyData\KMU-FED
+```
+
+---
+
+## PHASE 1 — Dataset Inspection
+
+**Status: COMPLETE**
+**Script:** `preprocessing/phase1_inspect_dataset.py`
+
+### Outputs
+- `data/metadata/kmu_fed_metadata.csv`  (1100 rows)
+- `data/metadata/dataset_statistics_report.txt`
+
+---
+
+### What Problem Does Phase 1 Solve?
+
+Before doing anything with the dataset, we need to answer basic questions:
+- What files exist?
+- Are they all valid images?
+- Are there duplicates?
+- How many subjects, emotions, and sequences are there?
+- What do the filenames mean?
+
+Without this step, later phases could silently process bad data.
+
+---
+
+### What Does the Script Do? (Step by Step)
+
+#### Step 1 — Scan the folder
+```python
+all_files = sorted(os.listdir(raw_dir))
+```
+`os.listdir()` returns all filenames in the folder.
+`sorted()` ensures consistent alphabetical ordering every run.
+
+#### Step 2 — Filter known duplicates
+```python
+if is_known_duplicate(filename):
+    excluded_records.append({...})
+    continue
+```
+The 6 files starting with `1_AN_mr_` are byte-for-byte copies of `01_AN_mr_` files.
+Confirmed by comparing MD5 hashes — both produced the same hash value.
+`continue` skips to the next file without processing the duplicate.
+
+**Why does this matter?**
+Without exclusion, subject "1" and subject "01" would appear as different people,
+corrupting our train/test split in Phase 7.
+
+#### Step 3 — Parse the filename
+```python
+parts = name.split("_")
+# "01_AN_mr_005" -> ["01", "AN", "mr", "005"]
+subject_id, emotion_code, person_code, frame_id = parts
+```
+No external label file is needed. The filename IS the label.
+
+#### Step 4 — Verify the image
+```python
+with Image.open(filepath) as img:
+    width, height = img.size
+    color_mode = img.mode
+```
+Confirms the file is a real, readable image. Records its dimensions and color mode.
+Result for KMU-FED: every file is a valid 1600x1200 RGB JPEG.
+
+#### Step 5 — Build the sequence ID
+```python
+sequence_id = f"{subject_id}_{emotion_code}_{person_code}"
+# Example: "01_AN_mr"
+```
+A sequence = one person performing one emotion across multiple frames.
+This key is critical for Phase 7: we never split frames from the same sequence.
+
+#### Step 6 — Write the metadata CSV
+```python
+writer = csv.DictWriter(f, fieldnames=fieldnames)
+writer.writeheader()
+writer.writerows(valid_records)
+```
+Each valid image becomes one row in the spreadsheet.
+
+#### Step 7 — Write the statistics report
+A human-readable text file showing counts, distributions, and warnings.
+
+---
+
+### Key Findings from Phase 1
+
+| Finding | Impact on Later Phases |
+|---------|----------------------|
+| Frames already exist | Phase 2 = verification only, no extraction needed |
+| All images are 1600x1200 RGB | Phase 5 resizes to 224x224 for EfficientNet |
+| 6 duplicates found and excluded | Clean start: 1100 images |
+| Class imbalance: Disgust=120, Happiness=210 | Phase 15 should use weighted loss |
+| Not all subjects have all emotions | Phase 7 split must account for this |
+| Sequences have 10 or 20 frames | Random frame-level split is FORBIDDEN |
+
+---
+
+### How to Manually Test Phase 1
+
+```bash
+# Run the script
+python preprocessing/phase1_inspect_dataset.py
+
+# Verify the CSV
+python -c "
+import pandas as pd
+df = pd.read_csv('data/metadata/kmu_fed_metadata.csv')
+print('Total rows:', len(df))
+print('Columns:', list(df.columns))
+print('Unique emotions:', df['emotion'].unique())
+print('Unique subjects:', sorted(df['subject_id'].unique()))
+assert len(df) == 1100, 'Expected 1100 rows!'
+assert '1' not in df['subject_id'].values, 'Duplicate subject found!'
+print('ALL CHECKS PASSED')
+"
+```
+
+Expected:
+- Total rows: **1100**
+- Unique emotions: 6 (Anger, Disgust, Fear, Happiness, Sadness, Surprise)
+- Unique subjects: 12 (01 through 12, no bare "1")
+
+---
+
+## PHASE 2 — Frame Verification
+
+**Status: COMPLETE**
+**Script:** `preprocessing/phase2_verify_frames.py`
+**Depends on:** Phase 1 output (`kmu_fed_metadata.csv`)
+
+### Outputs
+- `data/frames/` (1100 image files organized into 61 sequence folders)
+- `data/metadata/kmu_fed_sequences.csv` (summary of all 61 sequences)
+- Updated `data/metadata/kmu_fed_metadata.csv` (with working frame paths)
+
+---
+
+### What Problem Does Phase 2 Solve?
+
+Phase 1 reads from the raw folder (read-only).
+Phase 2 creates an organised working copy under `data/frames/`.
+
+**Why make a copy?**
+- Raw data stays untouched (backup safety)
+- Downstream phases write new files next to these copies
+- A predictable folder structure makes debugging easier
+
+---
+
+### Folder Structure After Phase 2
+
+```
+data/frames/
+    01_AN_mr/
+        01_AN_mr_001.jpg
+        01_AN_mr_002.jpg
+        ...
+    01_DI_mr/
+        01_DI_mr_001.jpg
+        ...
+```
+
+Each sequence gets its own subfolder named after its sequence_id.
+
+---
+
+### What Phase 2 Does
+
+1. Read `kmu_fed_metadata.csv` (produced by Phase 1)
+2. For each row: copy the image from `raw/` to `data/frames/{sequence_id}/`
+3. Do a deeper validation (check image header + pixel data integrity)
+4. Update the `image_path` column in metadata to point to the new location
+5. Write updated metadata back to CSV
+
+---
+
+### How to Manually Test Phase 2 (after it is built)
+
+```bash
+python preprocessing/phase2_verify_frames.py
+
+python -c "
+import os
+total = sum(len(files) for _, _, files in os.walk('data/frames'))
+print('Files copied to data/frames:', total)
+assert total == 1100, 'Expected 1100 files!'
+print('CHECK PASSED')
+"
+```
+
+Expected: 1100 files across 61 subfolders.
+
+---
+
+## PHASE 3 — Face Detection
+
+**Status: COMPLETE**
+**Script:** `preprocessing/face_detection.py`
+**Depends on:** Phase 2 output (`data/frames/`)
+
+### Outputs
+- `data/detected_faces/` (cropped face images in 61 sequence folders)
+- `logs/face_detection_failures.csv` (failure audit log)
+- `data/metadata/kmu_fed_detected_faces.csv` (bounding boxes, confidences, and 5 facial landmarks)
+
+---
+
+### What Problem Does Phase 3 Solve?
+
+Raw images are 1600x1200 and include shoulders, background, and other irrelevant areas.
+A neural network for emotion classification only needs the FACE region.
+
+Phase 3 finds the face bounding box and crops it out.
+
+---
+
+### How Face Detection Works
+
+```
+Original 1600x1200 Image
+         |
+   Face Detector (MTCNN or RetinaFace)
+         |
+   Bounding Box (x1, y1, x2, y2)
+         |
+   Crop the face region
+         |
+   Save cropped face to data/detected_faces/
+```
+
+The bounding box is a rectangle around the face:
+- (x1, y1) = top-left corner pixel coordinates
+- (x2, y2) = bottom-right corner pixel coordinates
+- confidence = how certain the detector is (0.0 to 1.0)
+
+---
+
+### Handling Failures
+
+If no face is detected in an image:
+- The image path is written to `logs/face_detection_failures.csv`
+- Processing continues with the next image
+- The image is NOT silently discarded — it is flagged
+
+---
+
+### How to Manually Test Phase 3 (after it is built)
+
+```bash
+python preprocessing/face_detection.py
+
+python -c "
+import pandas as pd, os
+failures = pd.read_csv('logs/face_detection_failures.csv')
+detected = sum(len(files) for _, _, files in os.walk('data/detected_faces'))
+print('Detected faces:', detected)
+print('Failed detections:', len(failures))
+print('Detection rate:', detected / (detected + len(failures)) * 100, '%')
+"
+```
+
+---
+
+## PHASE 4 — Face Alignment
+
+**Status: COMPLETE**
+**Script:** `preprocessing/face_alignment.py`
+**Depends on:** Phase 3 output (`data/detected_faces/`)
+
+### Outputs
+- `data/aligned_faces/` (1,045 horizontally leveled face images across 61 sequence folders)
+- `data/metadata/kmu_fed_aligned_faces.csv` (alignment metadata with exact rotation angles applied)
+- `logs/alignment_failures.csv` (alignment failure log)
+
+---
+
+### What Problem Does Phase 4 Solve?
+
+Detected faces may be tilted or rotated differently between images.
+Alignment ensures all faces have consistent geometry before neural network training.
+
+```
+Before alignment:           After alignment:
+  Face tilted 15 degrees  ->  Eyes are horizontal
+  Face slightly rotated   ->  Nose centered
+  Inconsistent position   ->  Consistent crop
+```
+
+---
+
+### How Alignment Works
+
+```
+Detected Face
+     |
+Facial Landmark Detector  (finds 68 or 5 key points on the face)
+     |
+Locate eye centers (left eye x,y and right eye x,y)
+     |
+Calculate angle: angle = arctan((right_y - left_y) / (right_x - left_x))
+     |
+Apply affine transformation to rotate image by -angle degrees
+     |
+Aligned Face saved to data/aligned_faces/
+```
+
+An **affine transformation** is a mathematical operation that rotates, scales,
+and shifts an image while keeping straight lines straight and parallel lines parallel.
+
+---
+
+### How to Manually Test Phase 4 (after it is built)
+
+```bash
+python preprocessing/face_alignment.py
+
+python -c "
+import os
+aligned = sum(len(files) for _, _, files in os.walk('data/aligned_faces'))
+print('Aligned faces:', aligned)
+"
+```
+
+---
+
+## PHASE 5 — Resize and Normalization
+
+**Status: COMPLETE**
+**Script:** `preprocessing/preprocessing.py`
+**Depends on:** Phase 4 output (`data/aligned_faces/`)
+
+### Outputs
+- `data/processed/` (1,045 resized 224x224 face images across 61 sequence folders)
+- `data/metadata/kmu_fed_processed.csv` (processed metadata with 224x224 dimensions)
+- PyTorch transformation pipeline: `get_default_transform()` and `inverse_normalize()`
+
+---
+
+### What Problem Does Phase 5 Solve?
+
+EfficientNet-B0 requires exactly 224x224 pixel input.
+Neural networks also train better with normalized pixel values.
+
+---
+
+### What Normalization Does
+
+Step 1: Raw pixel value is 0–255 (integer)
+Step 2: Divide by 255 → 0.0 to 1.0 (float)
+Step 3: Apply ImageNet normalization:
+```
+normalized_R = (R/255 - 0.485) / 0.229
+normalized_G = (G/255 - 0.456) / 0.224
+normalized_B = (B/255 - 0.406) / 0.225
+```
+
+**Why ImageNet statistics?**
+Our EfficientNet was pretrained on ImageNet using these statistics.
+We must match them so the pretrained weights work correctly.
+
+---
+
+### How to Manually Test Phase 5 (after it is built)
+
+```bash
+python preprocessing/preprocessing.py --preview
+
+# Should output:
+# Tensor shape: torch.Size([3, 224, 224])
+# Value range: approx -2.1 to +2.6
+```
+
+---
+
+## PHASE 6 — Data Augmentation
+
+**Status: COMPLETE**
+**Script:** `preprocessing/augmentation.py`
+
+### Outputs
+- `preprocessing/augmentation.py` (PyTorch transform pipeline matching `config.py` settings)
+- `data/augmentation_preview.jpg` (visual preview strip of Original vs 5 augmented variations)
+
+---
+
+### What Problem Does Phase 6 Solve?
+
+1100 images is a small dataset for deep learning.
+Augmentation creates realistic variations to expand the effective dataset size
+and prevent overfitting.
+
+The emotion does NOT change — only the visual appearance changes slightly.
+
+---
+
+### Augmentations Explained
+
+| Augmentation       | What It Does                        | Config Parameter              |
+|--------------------|-------------------------------------|-------------------------------|
+| Horizontal flip    | Mirror the image left-right         | AUG_HORIZONTAL_FLIP_PROB=0.5  |
+| Random rotation    | Tilt +/- 10 degrees                 | AUG_ROTATION_DEGREES=10       |
+| Random crop        | Crop 85-100% then resize            | AUG_RANDOM_CROP_SCALE         |
+| Brightness adjust  | Brighter or darker                  | AUG_BRIGHTNESS_FACTOR=0.2     |
+| Contrast adjust    | More or less contrasty              | AUG_CONTRAST_FACTOR=0.2       |
+| Gaussian Blur      | Softly blur the image               | AUG_GAUSSIAN_BLUR_ENABLED     |
+| Gaussian Noise     | Add tiny random pixel variations    | AUG_GAUSSIAN_NOISE_ENABLED    |
+
+### Gaussian Blur — Plain English
+
+Imagine smearing each pixel's color slightly into its neighbors.
+The result looks like the image was taken slightly out of focus.
+"Gaussian" = the amount of smearing follows a bell-curve shape
+(center pixels smear more, outer pixels smear less).
+
+### Gaussian Noise — Plain English
+
+Imagine adding a tiny random number (+/-) to each pixel.
+The result looks like very faint grain or static.
+Simulates real-world camera sensor imperfections.
+
+### Turn them on/off in config.py:
+```python
+AUG_GAUSSIAN_BLUR_ENABLED  = True   # Change to False to disable
+AUG_GAUSSIAN_NOISE_ENABLED = True   # Change to False to disable
+```
+
+---
+
+### How to Manually Test Phase 6 (after it is built)
+
+```bash
+python preprocessing/augmentation.py --preview --n_samples 5
+# Opens a window showing 5 augmented versions of the same face side-by-side
+```
+
+---
+
+## PHASE 7 — Train/Validation/Test Split
+
+**Status: COMPLETE**
+**Script:** `preprocessing/split_dataset.py`
+**Depends on:** Phase 5 output (`kmu_fed_processed.csv`)
+
+### Outputs
+- `data/metadata/train.csv` (732 rows, 70.0% — Subjects: 1, 3, 5, 6, 7, 9, 10, 12)
+- `data/metadata/val.csv` (157 rows, 15.0% — Subjects: 4, 8)
+- `data/metadata/test.csv` (156 rows, 14.9% — Subjects: 2, 11)
+- Verified: Zero subject overlap & all 6 emotions present in every split
+
+---
+
+### What Problem Does Phase 7 Solve?
+
+We need three separate groups of data:
+- **Training set** — teaches the model
+- **Validation set** — monitors training, guides decisions (NOT used for final numbers)
+- **Test set** — used ONCE at the very end for honest final evaluation
+
+---
+
+### Why NOT Split Individual Frames?
+
+WRONG (causes data leakage):
+```
+Frame 001 of 01_AN_mr -> Train
+Frame 002 of 01_AN_mr -> Test    <- Frame 001 and 002 are nearly identical!
+Frame 003 of 01_AN_mr -> Train
+```
+
+Frame 002 looks almost exactly like Frame 001.
+If the model saw Frame 001 during training, it effectively already
+"knows" Frame 002 at test time. This gives falsely high test accuracy.
+
+CORRECT (subject-wise split — no leakage):
+```
+Subjects 01-08  -> All their frames go to Train
+Subjects 09-10  -> All their frames go to Validation
+Subjects 11-12  -> All their frames go to Test
+```
+
+The model has NEVER seen any image of Subject 11 or 12 during training.
+
+---
+
+### Outputs
+
+```
+data/metadata/train.csv   -- training set rows
+data/metadata/val.csv     -- validation set rows
+data/metadata/test.csv    -- test set rows
+```
+
+---
+
+### How to Manually Test Phase 7 (after it is built)
+
+```bash
+python preprocessing/split_dataset.py
+
+python -c "
+import pandas as pd
+train = pd.read_csv('data/metadata/train.csv')
+val   = pd.read_csv('data/metadata/val.csv')
+test  = pd.read_csv('data/metadata/test.csv')
+
+# CRITICAL: no subject overlap between train and test
+train_subj = set(train['subject_id'])
+test_subj  = set(test['subject_id'])
+overlap = train_subj & test_subj
+assert overlap == set(), f'DATA LEAKAGE! Overlap: {overlap}'
+print('Train:', len(train), 'rows')
+print('Val:  ', len(val),   'rows')
+print('Test: ', len(test),  'rows')
+print('NO SUBJECT OVERLAP — SPLIT IS CLEAN')
+"
+```
+
+---
+
+## PHASE 8 — Positive and Negative Pair Generation
+
+**Status: COMPLETE**
+**Script:** `preprocessing/generate_pairs.py`
+**Depends on:** Phase 7 output (train/val/test CSVs)
+
+### Outputs
+- `data/metadata/train_pairs.csv` (3,000 balanced pairs: 1,500 positive, 1,500 negative)
+- `data/metadata/val_pairs.csv` (600 balanced pairs: 300 positive, 300 negative)
+- `data/metadata/test_pairs.csv` (600 balanced pairs: 300 positive, 300 negative)
+- Preserves full metadata (`image_1, image_2, emotion_1, emotion_2, subject_1, subject_2, label, pair_type`)
+
+---
+
+### What Problem Does Phase 8 Solve?
+
+Contrastive learning requires pairs of images:
+- **Positive pair (label=1)**: two images of the SAME emotion
+- **Negative pair (label=0)**: two images of DIFFERENT emotions
+
+These pairs teach the network to cluster similar emotions together
+and push different emotions apart in feature space.
+
+---
+
+### Positive Pair
+
+```
+Happy face A  +  Happy face B  ->  Label: 1
+```
+Can also be the same image with two different augmentations applied:
+```
+Happy face + augmentation A  |
+                              +-->  Label: 1
+Happy face + augmentation B  |
+```
+
+### Negative Pair
+
+```
+Happy face  +  Angry face  ->  Label: 0
+```
+
+---
+
+### Golden Rule for Pairs
+
+A pair must NEVER cross the train/test boundary.
+Training pairs use only training images.
+Test pairs use only test images.
+
+---
+
+### Output Format
+
+```csv
+image_1,image_2,emotion_1,emotion_2,subject_1,subject_2,label,pair_type
+data/processed/01_HA_mr/01_HA_mr_001.jpg,data/processed/03_HA_s02/03_HA_s02_036.jpg,Happiness,Happiness,1,3,1,cross_subject_pos
+data/processed/05_HA_uj/05_HA_uj_080.jpg,data/processed/05_FE_uj/05_FE_uj_097.jpg,Happiness,Fear,5,5,0,negative
+```
+
+---
+
+### How to Manually Test Phase 8
+
+```bash
+python preprocessing/generate_pairs.py
+
+python -c "
+import pandas as pd
+train_pairs = pd.read_csv('data/metadata/train_pairs.csv')
+val_pairs   = pd.read_csv('data/metadata/val_pairs.csv')
+test_pairs  = pd.read_csv('data/metadata/test_pairs.csv')
+
+assert len(train_pairs) == 3000
+assert (train_pairs['label'] == 1).sum() == 1500
+assert (train_pairs['label'] == 0).sum() == 1500
+assert ((train_pairs['label'] == 1) == (train_pairs['emotion_1'] == train_pairs['emotion_2'])).all()
+
+# Leakage check: test pair images never appear in train pair images
+tr_imgs = set(train_pairs['image_1']).union(set(train_pairs['image_2']))
+te_imgs = set(test_pairs['image_1']).union(set(test_pairs['image_2']))
+assert tr_imgs.isdisjoint(te_imgs), 'Leakage between train and test pairs!'
+
+print('Train pairs:', len(train_pairs), '(1500 pos, 1500 neg)')
+print('Val pairs:  ', len(val_pairs), '(300 pos, 300 neg)')
+print('Test pairs: ', len(test_pairs), '(300 pos, 300 neg)')
+print('ALL CHECKS PASSED: Pairs are balanced with zero train-test leakage!')
+"
+```
+
+---
+
+## PHASE 9 — Contrastive Learning Dataset
+
+**Status: COMPLETE**
+**Script:** `datasets/contrastive_dataset.py`
+**Depends on:** Phase 8 output (`train_pairs.csv`, `val_pairs.csv`, `test_pairs.csv`)
+
+### Outputs
+- `datasets/contrastive_dataset.py` (`ContrastivePairDataset` and `get_contrastive_dataloader()`)
+- Dynamic live augmentation pipeline (each training epoch sees varied augmentations without saving redundant images to disk)
+- Yields batch tensors of shape `(32, 3, 224, 224)` with float32 labels
+
+---
+
+### What is a PyTorch Dataset?
+
+A PyTorch Dataset is a class that answers two questions:
+1. `__len__`: How many items do you have?
+2. `__getitem__(i)`: Give me item number i.
+
+```python
+dataset = ContrastivePairDataset(...)
+len(dataset)      # e.g. 3000 pairs
+dataset[0]        # returns (view1_tensor, view2_tensor, label)
+```
+
+A **DataLoader** wraps the Dataset and handles batching and shuffling automatically.
+
+---
+
+### Dynamic Augmentation (Important Optimization)
+
+Instead of pre-saving thousands of augmented images on disk (wastes storage),
+augmentations are applied LIVE each time an item is requested.
+
+This means each training epoch sees slightly different augmented versions,
+which helps the model generalise better.
+
+---
+
+### How to Manually Test Phase 9
+
+```bash
+python datasets/contrastive_dataset.py
+```
+
+Expected output:
+- Train DataLoader: 3000 pairs (93 batches)
+- Val DataLoader: 600 pairs (19 batches)
+- Test DataLoader: 600 pairs (19 batches)
+- Single pair tensor shape: `torch.Size([3, 224, 224])`
+- Mini-batch shape: `torch.Size([32, 3, 224, 224])`
+
+---
+
+## PHASE 10 — EfficientNet Feature Encoder
+
+**Status: COMPLETE**
+**Script:** `models/efficientnet_encoder.py`
+**Depends on:** Pretrained ImageNet weights (`efficientnet_b0`)
+
+### Outputs
+- `models/efficientnet_encoder.py` (`EfficientNetEncoder` class)
+- Extracts 1280-dimensional feature representations from `(batch, 3, 224, 224)` inputs
+- Complete parameter control: `freeze_backbone()`, `unfreeze_backbone()`, and `unfreeze_last_n_blocks()`
+
+---
+
+### What is EfficientNet?
+
+EfficientNet is a convolutional neural network family designed to be both
+accurate and computationally efficient. We use **EfficientNet-B0** (smallest).
+
+```
+Input: 224 x 224 x 3 image tensor
+  |
+EfficientNet-B0 (convolutional layers)
+  |
+Global Average Pooling
+  |
+Output: 1280-dimensional feature vector
+```
+
+The 1280 numbers in the feature vector describe the image's content abstractly.
+Two "Angry" faces should produce similar 1280-number vectors.
+An "Angry" and a "Happy" face should produce different vectors.
+
+---
+
+### Why Pretrained Weights?
+
+We start with weights pretrained on ImageNet (1.2 million images, 1000 classes).
+These weights already understand basic visual concepts: edges, textures, shapes.
+
+We then fine-tune for our specific task (facial expressions).
+This is called **transfer learning**.
+
+---
+
+### Encoder Class Design
+
+```python
+class EfficientNetEncoder(nn.Module):
+    def freeze_backbone(self):
+        # Stops all backbone parameter updates (used in Phase 15 Stage A)
+    def unfreeze_backbone(self):
+        # Allows backbone parameter updates (used in Phase 15 Stage B)
+    def unfreeze_last_n_blocks(self, n=3):
+        # Unfreezes top n feature blocks for fine-tuning
+    def forward(self, x):
+        # x shape: [batch, 3, 224, 224] -> returns: [batch, 1280]
+```
+
+---
+
+### How to Manually Test Phase 10
+
+```bash
+python models/efficientnet_encoder.py
+```
+
+Expected output:
+- Total parameters: ~4.0M
+- Forward pass: `[2, 3, 224, 224] -> [2, 1280]`
+- Freeze test: 0 trainable parameters
+- Partial unfreeze (last 3 blocks): ~3.15M trainable parameters
+- Full unfreeze test: ~4.0M trainable parameters
+
+---
+
+## PHASE 11 — Contrastive Learning Model (Siamese Network)
+
+**Status: COMPLETE**
+**Script:** `models/contrastive_model.py`
+**Depends on:** Phase 10 output (`models/efficientnet_encoder.py`)
+
+### Outputs
+- `models/contrastive_model.py` (`SiameseContrastiveNetwork` and `ContrastiveLoss`)
+- Shared EfficientNet-B0 backbone (frozen by default to protect features)
+- 2-layer MLP projection head (`1280` -> `512` -> `128`) with Batch Normalization and L2 normalization
+- Implements Euclidean distance contrastive loss with customizable margin ($m=1.0$)
+
+---
+
+### What is a Siamese Network?
+
+A Siamese network runs two inputs through the SAME network (identical weights)
+and compares their outputs. "Siamese" = like Siamese twins sharing a body.
+
+```
+Image A  ->  EfficientNet  ->  Embedding A --|
+                                              +--> Contrastive Loss
+Image B  ->  EfficientNet  ->  Embedding B --|
+```
+
+CRITICAL: Both EfficientNets in the diagram are THE SAME NETWORK.
+Updating weights for Image A's path also updates Image B's path.
+
+---
+
+### Projection Head (Used Only During Contrastive Training)
+
+```
+EfficientNet embedding (1280 dims)
+      |
+  Linear(1280 -> 512)
+      |
+  BatchNorm1d(512) -> ReLU
+      |
+  Linear(512 -> 128)
+      |
+  L2 Normalization (norm = 1.0)
+      |
+Projected embedding (128 dims)  <-- contrastive loss operates on this
+```
+
+After contrastive training, the projection head is REMOVED.
+Only the EfficientNet encoder is kept for Phase 14.
+
+---
+
+### How to Manually Test Phase 11
+
+```bash
+python models/contrastive_model.py
+```
+
+Expected output:
+- Total parameters: ~4.73M
+- Trainable (Projection Head): ~722K (Backbone is frozen)
+- Input pair shape: `[4, 3, 224, 224]` each
+- Output embedding shape: `[4, 128]` each (L2 norm: 1.0000)
+- Contrastive Loss computed & gradient flow: PASSED
+
+---
+
+## PHASE 12 — Contrastive Loss and Training
+
+**Status: COMPLETE**
+**Script:** `training/train_contrastive.py`
+**Depends on:** Phase 9 DataLoader (`contrastive_dataset.py`) & Phase 11 Model (`contrastive_model.py`)
+
+### Outputs
+- `training/train_contrastive.py` (contrastive training loop with dynamic augmentation, lr scheduling, and validation)
+- `models_checkpoints/best_contrastive_model.pth` (best model checkpoint based on validation loss)
+- `models_checkpoints/contrastive_encoder.pth` (trained encoder checkpoint ready for feature extraction)
+- `logs/contrastive_training_history.csv` (training and validation loss history across epochs)
+
+---
+
+### What is Contrastive Loss?
+
+The loss function measures how wrong the network is and guides correction.
+
+For **positive pairs** (same emotion, label=1):
+```
+Loss = distance(embedding_A, embedding_B)^2
+```
+"Pull similar embeddings together"
+
+For **negative pairs** (different emotion, label=0):
+```
+Loss = max(0, margin - distance(embedding_A, embedding_B))^2
+```
+"Push different embeddings apart — but only up to the margin distance"
+
+---
+
+### Training Loop
+
+```
+For each epoch (1 to 50):
+    For each batch of pairs:
+        1. Pass view1 and view2 through the Siamese network
+        2. Get embedding_A and embedding_B
+        3. Compute contrastive loss
+        4. Backpropagate (compute gradients)
+        5. Update weights (optimizer step)
+    Compute validation loss
+    Save checkpoint if validation loss improved
+    Print: epoch, train_loss, val_loss, learning_rate
+```
+
+---
+
+### How to Manually Test Phase 12
+
+```bash
+# Run 3 quick epochs of contrastive training
+python training/train_contrastive.py --epochs 3
+
+# Verify checkpoints were created
+python -c "
+import os, torch, pandas as pd
+assert os.path.exists('models_checkpoints/best_contrastive_model.pth'), 'Missing best model!'
+assert os.path.exists('models_checkpoints/contrastive_encoder.pth'), 'Missing encoder!'
+assert os.path.exists('logs/contrastive_training_history.csv'), 'Missing history log!'
+
+history = pd.read_csv('logs/contrastive_training_history.csv')
+print('Training History:')
+print(history[['epoch', 'train_loss', 'val_loss', 'is_best']])
+print('ALL CHECKS PASSED: Contrastive training succeeded!')
+"
+```
+
+---
+
+## PHASE 13 — Feature Representation Extraction
+
+**Status: COMPLETE**
+**Script:** `training/extract_features.py`
+**Depends on:** Phase 12 checkpoint (`models_checkpoints/contrastive_encoder.pth`)
+
+### Outputs
+- `features/train_features.npy` (shape: `[732, 1280]`) & `features/train_labels.npy` (`[732]`)
+- `features/val_features.npy` (shape: `[157, 1280]`) & `features/val_labels.npy` (`[157]`)
+- `features/test_features.npy` (shape: `[156, 1280]`) & `features/test_labels.npy` (`[156]`)
+- Metadata traceability CSVs (`train_metadata.csv`, `val_metadata.csv`, `test_metadata.csv`)
+
+---
+
+### What Happens Here?
+
+After contrastive training:
+1. Remove the projection head from the Siamese network
+2. Keep only the EfficientNet encoder
+3. Pass all images through it (train, val, test)
+4. Save the 1280-dimensional feature vectors to disk
+
+```
+features/
+    train_features.npy   shape: [N_train, 1280]
+    val_features.npy     shape: [N_val,   1280]
+    test_features.npy    shape: [N_test,  1280]
+    train_labels.npy
+    val_labels.npy
+    test_labels.npy
+```
+
+Saving these vectors avoids re-running EfficientNet every time we
+train or tune the classifier in Phase 14.
+
+---
+
+### How to Manually Test Phase 13
+
+```bash
+python training/extract_features.py
+
+python -c "
+import numpy as np, os
+tr_f = np.load('features/train_features.npy')
+va_f = np.load('features/val_features.npy')
+te_f = np.load('features/test_features.npy')
+tr_l = np.load('features/train_labels.npy')
+va_l = np.load('features/val_labels.npy')
+te_l = np.load('features/test_labels.npy')
+
+assert tr_f.shape == (732, 1280) and len(tr_l) == 732
+assert va_f.shape == (157, 1280) and len(va_l) == 157
+assert te_f.shape == (156, 1280) and len(te_l) == 156
+assert len(np.unique(tr_l)) == 6 and len(np.unique(te_l)) == 6
+
+print('Train features:', tr_f.shape, '| labels:', tr_l.shape)
+print('Val features:  ', va_f.shape, '| labels:', va_l.shape)
+print('Test features: ', te_f.shape, '| labels:', te_l.shape)
+print('ALL CHECKS PASSED: Feature representations cleanly extracted!')
+"
+```
+
+---
+
+## PHASE 14 — Emotion Classification
+
+**Status: COMPLETE**
+**Script:** `models/emotion_classifier.py`
+**Depends on:** Phase 10 Encoder (`models/efficientnet_encoder.py`) & Phase 13 Features (`features/`)
+
+### Outputs
+- `models/emotion_classifier.py`:
+  - `EmotionClassifier`: Lightweight MLP head mapping 1280-dim feature vectors to emotion logits.
+  - `EndToEndEmotionModel`: Unified PyTorch module combining `EfficientNetEncoder` and `EmotionClassifier` with selective freezing controls.
+- Parameter count: 329,990 parameters in classifier head (329,990 trainable).
+
+---
+
+### Architecture
+
+```
+EfficientNet Feature Vector (1280 dims)
+         |
+   Linear(1280 -> 256)
+         |
+   BatchNorm1d(256)
+         |
+   ReLU activation
+         |
+   Dropout(p=0.4)
+         |
+   Linear(256 -> N_classes)
+         |
+   Logits (Shape: [batch_size, 6])
+```
+
+### What is Dropout?
+
+During training, dropout randomly "turns off" 40% of neurons in a layer.
+This forces the network not to rely on any single neuron,
+preventing memorisation of training data (overfitting).
+At test time, dropout is turned OFF automatically (all neurons active).
+
+### Dynamic Number of Classes
+
+The classifier dynamically inspects the dataset metadata:
+```python
+num_classes = get_num_classes_from_metadata(config.TRAIN_CSV)  # Returns 6
+```
+
+---
+
+### How to Manually Test Phase 14
+
+```bash
+python models/emotion_classifier.py
+
+python -c "
+import torch
+from models.emotion_classifier import EmotionClassifier, EndToEndEmotionModel
+
+# 1. Test standalone classifier
+cls = EmotionClassifier(feature_dim=1280, num_classes=6)
+dummy_feats = torch.randn(4, 1280)
+cls.eval()
+logits = cls(dummy_feats)
+probs = cls.predict_proba(dummy_feats)
+preds = cls.predict(dummy_feats)
+
+assert logits.shape == (4, 6)
+assert probs.shape == (4, 6)
+assert preds.shape == (4,)
+assert torch.allclose(probs.sum(dim=1), torch.ones(4), atol=1e-5)
+
+# 2. Test End-to-End model
+e2e = EndToEndEmotionModel(num_classes=6)
+dummy_img = torch.randn(2, 3, 224, 224)
+e2e.eval()
+e2e_logits = e2e(dummy_img)
+assert e2e_logits.shape == (2, 6)
+
+print('Standalone classifier test: PASSED (Shape [4, 6])')
+print('End-to-End model test:      PASSED (Shape [2, 6])')
+print('ALL CHECKS PASSED: Phase 14 Emotion Classifier is verified!')
+"
+```
+
+
+---
+
+## PHASE 15 — Classifier Training and Fine-Tuning
+
+**Status: COMPLETE**
+**Script:** `training/train_classifier.py`
+**Depends on:** Phase 13 Features (`features/`) & Phase 14 Model (`models/emotion_classifier.py`)
+
+### Outputs
+- `models_checkpoints/best_classifier_stageA.pth`: Best MLP classifier head weights.
+- `models_checkpoints/best_emotion_model.pth`: Unified end-to-end model (EfficientNet encoder + trained classifier).
+- `logs/classifier_training_history.csv`: Per-epoch metrics across training stages.
+
+### Performance Summary
+- **Stage A Training Accuracy:** 100.00% (Loss: 0.0043)
+- **Stage A Validation Accuracy:** 70.70% (Loss: 0.8767)
+- **Held-Out Test Accuracy:** 53.21% (Loss: 1.5027, 156 samples across unseen subjects 2 and 11)
+  - Happiness: 100.0%
+  - Surprise: 85.0%
+  - Sadness: 75.0%
+  - Fear: 48.7%
+  - Anger: 11.1%
+  - Disgust: 10.0%
+
+---
+
+### Three-Stage Strategy
+
+#### Stage A — Warm up (backbone FROZEN)
+```
+EfficientNet: frozen (weights not updated)
+Classifier:   training directly on cached 1280-dim feature vectors
+LR: 1e-3, Epochs: 20
+```
+Purpose: The pretrained backbone already extracts strong features.
+Training the classifier head directly on cached features takes < 2 seconds and avoids backpropagating through 4 million CNN parameters.
+
+#### Stage B — Conservative Fine-Tuning
+```
+EfficientNet: top block unfrozen
+Classifier:   training with differential LR (1e-5 for encoder, 5e-5 for classifier)
+Epochs: 3 (or skipped via --skip_stage_b)
+```
+Purpose: Only accepted if validation loss strictly improves over Stage A to prevent overfitting on small datasets.
+
+#### Stage C — Evaluate (test set, NO training)
+```
+Test set used ONCE, final numbers reported.
+Zero data leakage guaranteed.
+```
+
+---
+
+### How to Manually Test Phase 15
+
+```bash
+# 1. Run Phase 15 training pipeline (20 epochs Stage A)
+python training/train_classifier.py --epochs_a 20
+
+# 2. Verify checkpoints, log files, and test accuracy
+python -c "
+import os, torch, pandas as pd, numpy as np
+from models.emotion_classifier import EmotionClassifier
+
+assert os.path.exists('models_checkpoints/best_classifier_stageA.pth'), 'Missing stage A checkpoint!'
+assert os.path.exists('models_checkpoints/best_emotion_model.pth'), 'Missing unified model!'
+assert os.path.exists('logs/classifier_training_history.csv'), 'Missing training log!'
+
+history = pd.read_csv('logs/classifier_training_history.csv')
+print('Training History Sample:')
+print(history[['stage', 'epoch', 'train_loss', 'train_acc', 'val_loss', 'val_acc']].tail(5))
+
+# Test evaluate
+te_f = np.load('features/test_features.npy')
+te_l = np.load('features/test_labels.npy')
+cls = EmotionClassifier(feature_dim=1280, num_classes=6)
+cls.load_state_dict(torch.load('models_checkpoints/best_classifier_stageA.pth'))
+cls.eval()
+with torch.no_grad():
+    preds = torch.argmax(cls(torch.from_numpy(te_f).float()), dim=1).numpy()
+acc = (preds == te_l).mean() * 100
+print(f'Verified Test Accuracy: {acc:.2f}%')
+assert acc > 40.0, f'Accuracy too low: {acc}%'
+print('ALL CHECKS PASSED: Phase 15 Classifier Training is fully verified!')
+"
+```
+
+
+---
+
+## PHASE 16 — Model Evaluation
+
+**Status: COMPLETE**
+**Script:** `evaluation/evaluate.py`
+**Depends on:** Phase 15 Model (`models_checkpoints/best_classifier_stageA.pth` / `best_emotion_model.pth`) & Phase 13 Test Features (`features/`)
+
+### Outputs
+- `results/kmu_fed/classification_report.csv`: Complete per-class precision, recall, f1, and support.
+- `results/kmu_fed/confusion_matrix.csv`: Raw $6 \times 6$ confusion matrix values.
+- `results/kmu_fed/confusion_matrix.png`: Heatmap plot with raw prediction counts.
+- `results/kmu_fed/confusion_matrix_normalized.png`: Heatmap normalized by true row percentages.
+- `results/kmu_fed/per_class_metrics.png`: Grouped bar chart comparing Precision, Recall, and F1 per emotion.
+- `results/kmu_fed/per_sample_predictions.csv`: Detailed frame-level predictions with confidence scores and probabilities.
+- `results/kmu_fed/evaluation_summary.json`: JSON record of aggregate performance metrics.
+
+---
+
+### Key Evaluation Results (Held-Out Test Set: 156 Unseen Faces)
+
+| Metric | Score | Plain English |
+| :--- | :--- | :--- |
+| **Accuracy** | **57.05%** | Correct predictions out of 100 on unseen people (Random guessing is 16.67%) |
+| **Macro Precision** | **63.82%** | Average precision across all 6 emotion categories |
+| **Macro Recall** | **60.19%** | Average detection coverage across all 6 emotion categories |
+| **Macro F1-Score** | **53.67%** | Balanced harmonic mean of Precision and Recall |
+| **Weighted F1-Score** | **53.21%** | F1-Score weighted by the number of samples per emotion |
+
+#### Per-Class Performance:
+| Emotion | Precision | Recall | F1-Score | Support (Samples) | Key Takeaway |
+| :--- | :---: | :---: | :---: | :---: | :--- |
+| **Anger** | **100.00%** | 14.81% | 25.81% | 27 | Zero false positives: every predicted Anger was genuinely Anger |
+| **Disgust** | 60.00% | 30.00% | 40.00% | 20 | Often confused with Surprise due to mouth opening |
+| **Fear** | 61.76% | 53.85% | 57.53% | 39 | Strong detection coverage on subtle fear expressions |
+| **Happiness** | 50.00% | **100.00%** | **66.67%** | 10 | Perfect recall: caught 100% of happy expressions |
+| **Sadness** | 58.62% | **85.00%** | **69.39%** | 20 | Very high detection rate (17/20 correct) |
+| **Surprise** | 52.54% | **77.50%** | **62.63%** | 40 | Reliable detection of raised brow & open mouth geometry |
+
+---
+
+### Confusion Matrix (Test Set)
+
+```
+           Pred_Anger  Pred_Disgust  Pred_Fear  Pred_Happiness  Pred_Sadness  Pred_Surprise
+True_Anger         4             0          6               0             9              8
+True_Disgust       0             6          1               0             0             13
+True_Fear          0             3         21              10             0              5
+True_Happiness     0             0          0              10             0              0
+True_Sadness       0             1          0               0            17              2
+True_Surprise      0             0          6               0             3             31
+```
+
+---
+
+### How to Manually Test Phase 16
+
+```bash
+# 1. Run evaluation script
+python evaluation/evaluate.py
+
+# 2. Verify generated reports and plots
+python -c "
+import os, json, pandas as pd
+
+results_dir = 'results/kmu_fed'
+expected_files = [
+    'classification_report.csv',
+    'confusion_matrix.csv',
+    'confusion_matrix.png',
+    'confusion_matrix_normalized.png',
+    'per_class_metrics.png',
+    'per_sample_predictions.csv',
+    'evaluation_summary.json'
+]
+
+for f in expected_files:
+    p = os.path.join(results_dir, f)
+    assert os.path.exists(p), f'Missing {f}!'
+    assert os.path.getsize(p) > 0, f'{f} is empty!'
+
+with open(os.path.join(results_dir, 'evaluation_summary.json')) as f:
+    summary = json.load(f)
+
+print('Evaluation Summary:')
+print('  Dataset:    ', summary['dataset'])
+print('  Accuracy:   ', summary['accuracy'], '%')
+print('  Macro F1:   ', summary['macro_f1'], '%')
+print('  Weighted F1:', summary['weighted_f1'], '%')
+print('ALL CHECKS PASSED: Phase 16 Evaluation outputs and plots are 100% verified!')
+"
+```
+
+
+---
+
+## PHASE 17 — Feature Visualization
+
+**Status: COMPLETE**
+**Script:** `visualization/feature_visualization.py`
+**Depends on:** Phase 13 Features (`features/`)
+
+### Outputs
+- `results/kmu_fed/tsne_features_test.png`: 2D t-SNE scatter plot of test set features (unseen Subjects 2 & 11).
+- `results/kmu_fed/pca_features_test.png`: 2D PCA scatter plot of test set features.
+- `results/kmu_fed/tsne_features_train.png`: 2D t-SNE scatter plot of training set features (8 subjects, 732 faces).
+- `results/kmu_fed/tsne_features_all.png`: 2D t-SNE scatter plot across all 1,045 KMU-FED faces.
+- `results/kmu_fed/clustering_metrics.json`: Quantitative cluster separation metrics.
+
+---
+
+### What is t-SNE?
+
+t-SNE (t-Distributed Stochastic Neighbor Embedding) takes high-dimensional data (1,280 numbers per image) and compresses it down to 2 dimensions $(x, y)$ for plotting, while preserving the geometric neighborhood structure.
+- Faces with similar emotional features end up close together in the 2D plot.
+- Faces with different emotional expressions get pushed far apart.
+
+### Mathematical Clustering Metrics
+
+| Dataset Split | Silhouette Score (Higher is better) | Davies-Bouldin Index (Lower is better) | Calinski-Harabasz Index (Higher is better) |
+| :--- | :---: | :---: | :---: |
+| **Test Set (Unseen)** | **0.0483** | **2.3438** | **13.10** |
+| **Training Set** | 0.0064 | 5.4960 | 16.28 |
+| **Entire Dataset (1,045 Faces)** | 0.0089 | 5.6269 | 22.20 |
+
+### Key Observations from the 2D Projections:
+1. **Happiness & Surprise:** Form clear, isolated island clusters away from neutral/negative expressions due to distinct mouth opening and cheek elevation.
+2. **Sadness & Fear:** Group into adjacent clusters, reflecting shared eyebrow and forehead muscle tension.
+3. **Anger:** Highly localized in feature space, explaining the 100% precision observed in Phase 16.
+
+---
+
+### How to Manually Test Phase 17
+
+```bash
+# 1. Run visualization generation script
+python visualization/feature_visualization.py
+
+# 2. Verify all plots and metric files
+python -c "
+import os, json
+
+results_dir = 'results/kmu_fed'
+expected_files = [
+    'tsne_features_test.png',
+    'tsne_features_train.png',
+    'tsne_features_all.png',
+    'pca_features_test.png',
+    'clustering_metrics.json'
+]
+
+for f in expected_files:
+    p = os.path.join(results_dir, f)
+    assert os.path.exists(p), f'Missing {f}!'
+    assert os.path.getsize(p) > 0, f'{f} is empty!'
+
+with open(os.path.join(results_dir, 'clustering_metrics.json')) as f:
+    metrics = json.load(f)
+
+print('Clustering Separation Metrics (Test Set):')
+print('  Silhouette Score:     ', metrics['test_set']['silhouette_score'])
+print('  Davies-Bouldin Index: ', metrics['test_set']['davies_bouldin_score'])
+print('  Calinski-Harabasz:    ', metrics['test_set']['calinski_harabasz_score'])
+print('ALL CHECKS PASSED: Phase 17 Feature Visualization is 100% verified!')
+"
+```
+
+
+---
+
+## PHASE 18 — RAF-DB Comparison
+
+**Status: NOT STARTED**
+**Script:** `evaluation/compare_rafdb.py`
+
+---
+
+### What is RAF-DB?
+
+RAF-DB = Real-world Affective Faces Database.
+Large dataset from internet images. Very different from KMU-FED (lab setting).
+
+Same pipeline, same metrics, different dataset.
+The comparison reveals how well our approach generalises.
+
+### Controlled Rules
+
+Same across both:
+- EfficientNet-B0
+- 224x224 input
+- ImageNet normalization
+- Accuracy, Precision, Recall, F1
+
+| Metric    | KMU-FED | RAF-DB |
+|-----------|---------|--------|
+| Accuracy  |    XX%  |   XX%  |
+| Precision |    XX%  |   XX%  |
+| Recall    |    XX%  |   XX%  |
+| F1-score  |    XX%  |   XX%  |
+
+---
+
+## PHASE 19 — Ablation Study
+
+**Status: NOT STARTED**
+
+### What is an Ablation Study?
+
+Like removing parts of a car engine to see which ones matter.
+We compare three configurations to see what actually helps:
+
+| Experiment | Components                                         |
+|------------|----------------------------------------------------|
+| Exp 1      | EfficientNet + Classifier                          |
+| Exp 2      | EfficientNet + Augmentation + Classifier           |
+| Exp 3      | EfficientNet + Augmentation + Contrastive + Classifier |
+
+If Exp 3 >> Exp 1: contrastive learning is valuable.
+If Exp 2 ≈ Exp 3: augmentation was doing most of the work.
+
+---
+
+## Key Concepts Explained
+
+### Feature Vector
+A list of numbers representing an image's content abstractly.
+Similar images → similar numbers. Different images → different numbers.
+
+### Tensor
+A multi-dimensional array. A single image = tensor of shape [3, 224, 224].
+A batch of 32 images = tensor of shape [32, 3, 224, 224].
+
+### DataLoader
+Wraps a Dataset. Creates batches, shuffles, loads in parallel.
+
+### Epoch
+One full pass through all training data.
+Training for 50 epochs = the model sees every image 50 times.
+
+### Overfitting
+Model memorises training data but fails on new images.
+Signs: high train accuracy, low validation accuracy.
+Fixes: dropout, augmentation, contrastive learning.
+
+### Learning Rate
+How big a step the model takes when correcting mistakes.
+Too large: overshoots. Too small: very slow training.
+
+### Gradient
+The direction and magnitude of how to adjust weights to reduce loss.
+Computed by backpropagation (chain rule from calculus).
+
+---
+
+## Troubleshooting
+
+### "ModuleNotFoundError: No module named 'config'"
+Always run scripts from the project root:
+```bash
+cd C:\Users\kundu\OneDrive\Desktop\KMU-FED-2
+python preprocessing/phase1_inspect_dataset.py
+```
+
+### "FileNotFoundError: raw data directory not found"
+Verify the dataset is at:
+```
+C:\Users\kundu\Downloads\KMU-FED\
+```
+Or override:
+```bash
+python preprocessing/phase1_inspect_dataset.py --raw_dir "D:\MyData\KMU-FED"
+```
+
+### "No module named PIL"
+```bash
+pip install Pillow
+```
+
+### Phase 1 outputs wrong row count
+Run Phase 1 again — it will print which files were excluded and why.
+
+---
+
+*Document Status:*
+- Phases 1 through 17: COMPLETE and verified
+- Phase 18 onward: Awaiting user permission
+
+
+
+

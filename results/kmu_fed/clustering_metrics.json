@@ -1,0 +1,17 @@
+{
+    "test_set": {
+        "silhouette_score": 0.0483,
+        "davies_bouldin_score": 2.3438,
+        "calinski_harabasz_score": 13.1
+    },
+    "train_set": {
+        "silhouette_score": 0.0064,
+        "davies_bouldin_score": 5.496,
+        "calinski_harabasz_score": 16.28
+    },
+    "all_data": {
+        "silhouette_score": 0.0089,
+        "davies_bouldin_score": 5.6269,
+        "calinski_harabasz_score": 22.2
+    }
+}

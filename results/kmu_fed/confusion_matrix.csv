@@ -1,0 +1,7 @@
+,Pred_Anger,Pred_Disgust,Pred_Fear,Pred_Happiness,Pred_Sadness,Pred_Surprise
+True_Anger,4,0,6,0,9,8
+True_Disgust,0,6,1,0,0,13
+True_Fear,0,3,21,10,0,5
+True_Happiness,0,0,0,10,0,0
+True_Sadness,0,1,0,0,17,2
+True_Surprise,0,0,6,0,3,31

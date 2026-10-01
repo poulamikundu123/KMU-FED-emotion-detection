@@ -1,0 +1,118 @@
+============================================================
+  KMU-FED Dataset Statistics Report
+  Generated: 2026-10-01 10:08:51
+============================================================
+
+--- OVERVIEW ---
+  Total files in raw dir : 1106
+  Valid images           : 1100
+  Excluded duplicates    : 6
+  Unparseable filenames  : 0
+
+--- DATASET DIMENSIONS ---
+  Subjects   : 12
+  Emotions   : 6
+  Sequences  : 61
+
+--- SUBJECTS ---
+  Subject   01 :  120 frames
+  Subject   02 :   60 frames
+  Subject   03 :   90 frames
+  Subject   04 :   60 frames
+  Subject   05 :  120 frames
+  Subject   06 :  120 frames
+  Subject   07 :  100 frames
+  Subject   08 :  110 frames
+  Subject   09 :   70 frames
+  Subject   10 :   80 frames
+  Subject   11 :  100 frames
+  Subject   12 :   70 frames
+
+--- EMOTION CLASS DISTRIBUTION ---
+  Anger        :  190  ######################################
+  Disgust      :  120  ########################
+  Fear         :  200  ########################################
+  Happiness    :  210  ##########################################
+  Sadness      :  180  ####################################
+  Surprise     :  200  ########################################
+
+--- SEQUENCES ---
+  Sequence                   Frames
+  -------------------------  ------
+  01_AN_mr                       20
+  01_DI_mr                       20
+  01_FE_mr                       20
+  01_HA_mr                       20
+  01_SA_mr                       20
+  01_SU_mr                       20
+  02_AN_s01                      10
+  02_FE_s01                      20
+  02_HA_s01                      10
+  02_SU_s01                      20
+  03_AN_s02                      10
+  03_FE_s02                      20
+  03_HA_s02                      20
+  03_SA_s02                      20
+  03_SU_s02                      20
+  04_FE_s03                      20
+  04_HA_s03                      20
+  04_SA_s03                      10
+  04_SU_s03                      10
+  05_AN_uj                       20
+  05_DI_uj                       20
+  05_FE_uj                       20
+  05_HA_uj                       20
+  05_SA_uj                       20
+  05_SU_uj                       20
+  06_AN_dy                       20
+  06_DI_dy                       20
+  06_FE_dy                       20
+  06_HA_dy                       20
+  06_SA_dy                       20
+  06_SU_dy                       20
+  07_AN_sw                       20
+  07_FE_sw                       20
+  07_HA_sw                       20
+  07_SA_sw                       20
+  07_SU_sw                       20
+  08_AN_nh                       20
+  08_DI_nh                       20
+  08_FE_nh                       10
+  08_HA_nh                       20
+  08_SA_nh                       20
+  08_SU_nh                       20
+  09_AN_sj                       20
+  09_FE_sj                       10
+  09_HA_sj                       20
+  09_SA_sj                       10
+  09_SU_sj                       10
+  10_AN_ko                       10
+  10_DI_ko                       10
+  10_FE_ko                       20
+  10_HA_ko                       20
+  10_SU_ko                       20
+  11_AN_ej                       20
+  11_DI_ej                       20
+  11_FE_ej                       20
+  11_SA_ej                       20
+  11_SU_ej                       20
+  12_AN_gu                       20
+  12_DI_gu                       10
+  12_HA_gu                       20
+  12_SA_gu                       20
+
+--- EXCLUDED FILES ---
+  1_AN_mr_001.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+  1_AN_mr_002.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+  1_AN_mr_003.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+  1_AN_mr_004.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+  1_AN_mr_005.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+  1_AN_mr_006.jpg  (Duplicate (1_AN_mr_ == 01_AN_mr_))
+
+--- NOTES ---
+  - Resolution: 1600x1200 RGB (all images)
+  - Not all subjects have all 6 emotions
+  - Sequence-wise split required to prevent data leakage
+  - See explainable.md for full details
+
+============================================================

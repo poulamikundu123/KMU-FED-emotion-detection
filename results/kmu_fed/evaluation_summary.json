@@ -1,0 +1,20 @@
+{
+    "dataset": "KMU-FED",
+    "split": "test",
+    "total_test_samples": 156,
+    "accuracy": 57.05,
+    "macro_precision": 63.82,
+    "macro_recall": 60.19,
+    "macro_f1": 53.67,
+    "weighted_precision": 64.63,
+    "weighted_recall": 57.05,
+    "weighted_f1": 53.21,
+    "per_class_accuracy": {
+        "Anger": 14.81,
+        "Disgust": 30.0,
+        "Fear": 53.85,
+        "Happiness": 100.0,
+        "Sadness": 85.0,
+        "Surprise": 77.5
+    }
+}
