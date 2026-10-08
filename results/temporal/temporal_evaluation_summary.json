@@ -1,0 +1,16 @@
+{
+  "best_val_f1": 100.0,
+  "test_accuracy": 93.18181818181817,
+  "test_precision": 100.0,
+  "test_recall": 90.32258064516128,
+  "test_f1": 94.91525423728814,
+  "test_roc_auc": 98.26302729528535,
+  "raw_jitter": 0.12323949486017227,
+  "smoothed_jitter": 0.10239011291847673,
+  "jitter_reduction_percent": 16.917639157315165,
+  "window_size": 10,
+  "smoothing_k": 3,
+  "train_windows": 199,
+  "val_windows": 42,
+  "test_windows": 44
+}

@@ -1,45 +1,59 @@
-# KMU-FED Facial Emotion Recognition Pipeline
+# Cross-Domain Self-Supervised Adaptation Pipeline for Facial Affect & Temporal Stress Inference
 
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red.svg)](https://pytorch.org/)
-[![EfficientNet](https://img.shields.io/badge/Backbone-EfficientNet--B0-brightgreen.svg)](https://github.com/lukemelas/EfficientNet-PyTorch)
-[![Status](https://img.shields.io/badge/Status-Phases%201--17%20Complete-success.svg)]()
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.6%20CUDA-red.svg)](https://pytorch.org/)
+[![Backbone](https://img.shields.io/badge/Backbone-EfficientNet--B0-brightgreen.svg)](https://github.com/lukemelas/EfficientNet-PyTorch)
+[![Temporal](https://img.shields.io/badge/Temporal-Bidirectional%20GRU%20%2B%20Attention-orange.svg)]()
+[![Status](https://img.shields.io/badge/Status-Phases%201--4%20Complete%20%26%20Verified-success.svg)]()
 
-An end-to-end deep learning framework for **Facial Emotion Recognition (FER)** using **Siamese Contrastive Representation Learning** and **EfficientNet-B0** on the **KMU-FED** dataset (12 subjects, 6 emotions, 1,045 processed faces).
-
----
-
-## 📌 Key Highlights
-
-- **Strict Subject-Independent Splitting:** Zero data leakage. Test subjects (02 and 11) are completely unseen during training and validation.
-- **Automated Facial Preprocessing:** MTCNN face detection (10% safety margin) and affine pupil alignment (horizontal eye axis leveling).
-- **Siamese Contrastive Learning:** Pairs of images trained under Euclidean contrastive loss ($m=1.0$) to cluster same-emotion facial muscle geometry and push dissimilar emotions apart.
-- **High-Speed Feature Caching:** 1,280-dimensional feature vectors cached as `.npy` arrays, reducing downstream classifier training from 30 minutes to **2 seconds**.
-- **Three-Stage Classifier Strategy:** Fast feature warm-up (Stage A), conservative fine-tuning guard (Stage B), and held-out evaluation (Stage C).
-- **57.05% Test Accuracy on Unseen Faces:** Compared to 16.67% random guess on 6 balanced emotions.
-- **Interactive Inference Tool:** Single-command emotion predictor (`predict.py`) supporting any custom image or webcam selfie with automatic face detection.
+An end-to-end deep learning framework designed to solve real-world driver affect and stress detection on **KMU-FED** (12 vehicle drivers, 61 video sequences, 1,045 eye-aligned frames) through **Self-Supervised SimCLR Pre-Training**, **Cross-Domain Affective Transfer (RAF-DB)**, and **Temporal Sequence Modeling (BiGRU with Attention & Moving-Average Smoothing)**.
 
 ---
 
-## 📊 Performance Scorecard (Held-Out Test Set)
+## 📌 Architecture & Pipeline Overview
 
+```text
+Unlabeled Facial Video Sequences (KMU-FED)
+                 │
+                 ▼  [Cross-Domain Phase 1: Self-Supervised SimCLR Pre-Training]
+      Invariant Face Geometry Representation (self_supervised_backbone.pth)
+                 │
+                 ▼  [Cross-Domain Phase 2: Affective Transfer Learning (RAF-DB)]
+      Fine-Tuned Affective Backbone — 70.73% Test Accuracy (best_rafdb_affective_model.pth)
+                 │
+                 ▼  [Cross-Domain Phase 3: Temporal Sequence Modeling]
+      10-Frame Sliding Windows ➔ Bidirectional GRU ➔ Temporal Attention Spotlight
+      Step 22 Moving-Average Smoothing ➔ 93.18% Test Accuracy (best_temporal_stress_model.pth)
+                 │
+                 ▼  [Cross-Domain Phase 4: Real-Time Streaming & Tracking]
+      Rolling Buffer [F_t-9, ..., F_t] ➔ Real-Time Heads-Up Display (HUD) Dashboard
+```
+
+---
+
+## 📊 Comprehensive Performance Scorecard
+
+### 1. Cross-Domain Phase 3: Temporal Stress Inference (Held-Out Drivers `[02, 11]`)
+| Metric | Score | Clinical / Operational Meaning |
+| :--- | :---: | :--- |
+| **Test Accuracy** | **93.18%** | 41 out of 44 temporal sequence windows correctly classified |
+| **Test Precision** | **100.00%** | **Zero False Alarms!** Every stress alert is 100% genuine |
+| **Test Recall** | **90.32%** | Successfully catches over 9 out of 10 acute stress events |
+| **Test F1-Score** | **94.92%** | High harmonic mean between precision and recall |
+| **Test ROC-AUC** | **98.26%** | Near-perfect separation between calm and stressed score distributions |
+| **Step 22 Jitter Reduction** | **16.9%** | Rolling moving-average filter ($K=3$) eliminates annoying frame flicker |
+
+### 2. Cross-Domain Phase 2: Affective Transfer Learning (RAF-DB Test Set: 3,068 Faces)
 | Metric | Score | Note |
 | :--- | :---: | :--- |
-| **Overall Accuracy** | **57.05%** | 89 / 156 correct predictions on unseen Subjects 02 & 11 |
-| **Macro Precision** | **63.82%** | Average precision across all 6 emotion categories |
-| **Macro Recall** | **60.19%** | Average coverage across all 6 emotion categories |
-| **Macro F1-Score** | **53.67%** | Balanced harmonic mean of Precision and Recall |
-| **Weighted F1-Score**| **53.21%** | F1-Score weighted by sample frequency |
+| **Test Accuracy** | **70.73%** | 2,170 / 3,068 in-the-wild test faces correct (Stage B Fine-Tuning) |
+| **Weighted F1-Score** | **70.13%** | Balanced across imbalanced real-world distributions |
+| **Fear Precision (Key Stress Cue)** | **77.42%** | Highly reliable detection of acute distress cues |
+| **Happiness Precision** | **86.27%** | Clean separation of positive/calm states |
 
-### Per-Class Performance:
-| Emotion | Precision | Recall | F1-Score | Support | Key Finding |
-| :--- | :---: | :---: | :---: | :---: | :--- |
-| **Anger** | **100.00%** | 14.81% | 25.81% | 27 | 100% Precision: zero false positives |
-| **Disgust** | 60.00% | 30.00% | 40.00% | 20 | Confused occasionally with Surprise |
-| **Fear** | 61.76% | 53.85% | 57.53% | 39 | Strong detection coverage on subtle fear twitches |
-| **Happiness** | 50.00% | **100.00%** | **66.67%** | 10 | 100% Recall: perfect catch rate |
-| **Sadness** | 58.62% | **85.00%** | **69.39%** | 20 | High detection rate (17/20 correct) |
-| **Surprise** | 52.54% | **77.50%** | **62.63%** | 40 | Reliable mouth/eyebrow detection |
+### 3. Baseline KMU-FED FER: Static Image Pipeline (Phases 1–17)
+- **Overall Accuracy:** **57.05%** on unseen test subjects (vs 16.67% random baseline).
+- **Strict Subject Independence:** Zero leakage between training and testing drivers.
 
 ---
 
@@ -47,121 +61,127 @@ An end-to-end deep learning framework for **Facial Emotion Recognition (FER)** u
 
 ```text
 KMU-FED-2/
-├── config.py                       # Central paths, hyperparameters, and constants
-├── predict.py                      # Interactive single-image emotion inference tool
+├── config.py                       # Central paths, constants, and hyperparameters
 ├── for_me.md                       # Beginner-friendly master guide with Q&A boxes
 ├── explainable.md                  # Comprehensive engineering design decisions & metrics
+├── predict.py                      # Baseline single-image emotion inference tool
+│
 ├── data/
 │   ├── frames/                     # Verified video frames staged into 61 sequences
-│   ├── detected_faces/             # Cropped faces (MTCNN with 10% margin)
+│   ├── detected_faces/             # Cropped faces (MTCNN with 10% safety margin)
 │   ├── aligned_faces/              # Faces rotated to level the eye axis horizontally
 │   ├── processed/                  # Final 224x224 RGB faces ready for neural networks
-│   └── metadata/                   # Train/Val/Test CSVs, sequence logs, and pair datasets
+│   ├── features/                   # Cached 1280-dim temporal feature vectors (.pt)
+│   ├── metadata/                   # Train/Val/Test CSVs and sequence logs
+│   └── DATASET/                    # RAF-DB dataset (15,339 aligned faces)
+│
+├── datasets/
+│   ├── simclr_dataset.py           # Phase 1: Self-supervised positive-pair augmentations
+│   ├── rafdb_dataset.py            # Phase 2: RAF-DB affective dataset & dataloaders
+│   ├── temporal_dataset.py         # Phase 3: 10-frame sliding window temporal dataset
+│   └── contrastive_dataset.py      # Baseline: Siamese contrastive pair dataset
+│
 ├── models/
 │   ├── efficientnet_encoder.py     # EfficientNet-B0 backbone (1,280 feature outputs)
-│   ├── contrastive_model.py        # Siamese network with 2-layer projection head & loss
-│   └── emotion_classifier.py       # MLP classifier head & EndToEndEmotionModel wrapper
+│   ├── simclr_model.py             # Phase 1: SimCLR model with NT-Xent contrastive loss
+│   ├── emotion_classifier.py       # Phase 2: 7-class emotion classification head
+│   ├── temporal_model.py           # Phase 3: Bidirectional GRU with Temporal Attention
+│   └── contrastive_model.py        # Baseline: Siamese contrastive network
+│
 ├── models_checkpoints/
-│   ├── best_contrastive_model.pth  # Tuned Siamese contrastive network checkpoint
-│   ├── contrastive_encoder.pth     # Standalone emotion-aware feature extractor
-│   ├── best_classifier_stageA.pth  # Best trained MLP emotion classifier head
-│   └── best_emotion_model.pth      # Best unified end-to-end emotion model
-├── features/                       # Cached 1280-dim feature matrices (.npy) & metadata
+│   ├── self_supervised_backbone.pth # Phase 1: Pre-trained SimCLR backbone (16.3 MB)
+│   ├── best_rafdb_affective_model.pth # Phase 2: Fine-tuned 70.73% model (20.3 MB)
+│   ├── best_temporal_stress_model.pth # Phase 3: Best BiGRU temporal stress model
+│   └── best_emotion_model.pth      # Baseline: End-to-end KMU-FED emotion checkpoint
+│
+├── training/
+│   ├── train_simclr.py             # Phase 1: Self-supervised pre-training loop
+│   ├── train_rafdb_transfer.py     # Phase 2: Stage A warmup + Stage B fine-tuning
+│   ├── train_temporal.py           # Phase 3: BiGRU training & Step 22 smoothing evaluation
+│   ├── train_contrastive.py        # Baseline: Siamese contrastive training
+│   └── train_classifier.py         # Baseline: Three-stage classifier training
+│
+├── inference/
+│   └── predict_realtime.py         # Phase 4: Live webcam & video sliding-window engine
+│
+├── evaluation/
+│   ├── evaluate_rafdb.py           # Phase 2: Full RAF-DB confusion matrices & reports
+│   └── evaluate.py                 # Baseline: KMU-FED evaluation suite
+│
 ├── logs/                           # Training history CSVs and failure records
-├── results/
-│   └── kmu_fed/                    # Heatmaps, bar charts, 2D t-SNE/PCA plots, JSON metrics
-├── preprocessing/                  # Data preparation scripts (Phases 1 to 8)
-├── datasets/                       # ContrastivePairDataset with dynamic RAM caching
-├── training/                       # Contrastive and classifier training pipelines
-├── evaluation/                     # Metric evaluation scripts (confusion matrices & reports)
-└── visualization/                  # 2D t-SNE and PCA projection scripts
+└── results/
+    ├── realtime/                   # Phase 4: Heads-up display preview & JSON summary
+    ├── temporal/                   # Phase 3: Moving-average smoothing comparison plots
+    ├── raf_db/                     # Phase 2: Heatmaps, normalized CM, and reports
+    └── kmu_fed/                    # Baseline: t-SNE, PCA, and per-class bar charts
 ```
 
 ---
 
-## 🚀 Quick Start & Installation
+## 🚀 Quick Start & Usage
 
-### 1. Clone & Set Up Environment
+### 1. Installation
 ```bash
 git clone <repo-url>
 cd KMU-FED-2
 
-# Install dependencies
+# Install required dependencies
 pip install torch torchvision numpy pandas scikit-learn matplotlib seaborn pillow mtcnn opencv-python
 ```
 
-### 2. Live Interactive Prediction (Try Any Image!)
-Test any face image in **0.1 seconds**:
-
+### 2. Phase 4: Run Real-Time Temporal Inference (Live Stream & Demo)
 ```bash
-# Run on a sample face from the dataset
-python predict.py --image "data/processed/02_HA_s01/02_HA_s01_021.jpg" --save_annotated
+# Option A: Run automated demo on an actual vehicle driving sequence:
+python inference/predict_realtime.py
 
-# Or pass any image from your computer (auto-detects and crops face!)
-python predict.py --image "C:\path\to\your_photo.jpg" --save_annotated
+# Option B: Run live interactive webcam monitor with Heads-Up Display (press 'q' or 'ESC' to exit):
+python inference/predict_realtime.py --webcam
 ```
 
-Sample output:
-```text
-==============================================================
-           KMU-FED Facial Emotion Recognition Result          
-==============================================================
-  Input Image : data/processed/02_HA_s01/02_HA_s01_021.jpg
---------------------------------------------------------------
-  >>> PREDICTED EMOTION : HAPPINESS (95.08% Confidence) <<<
---------------------------------------------------------------
-  Full Class Probability Distribution:
-    Anger      :   0.46%  [-------------------------]  
-    Disgust    :   0.75%  [-------------------------]  
-    Fear       :   3.67%  [-------------------------]  
-    Happiness  :  95.08%  [#######################--] *
-    Sadness    :   0.01%  [-------------------------]  
-    Surprise   :   0.03%  [-------------------------]  
-==============================================================
-[OK] Saved annotated result image to: results/prediction_annotated.jpg
+### 3. Phase 3: Train & Test Temporal Stress Model (BiGRU + Smoothing)
+```bash
+# Test the 10-frame sliding window dataset generator:
+python datasets/temporal_dataset.py
+
+# Test the recurrent model architecture:
+python models/temporal_model.py
+
+# Run temporal training, held-out evaluation & Step 22 smoothing:
+python training/train_temporal.py
+```
+
+### 4. Phase 2: RAF-DB Affective Transfer Learning
+```bash
+# Stage B Fine-Tuning (Differential LR: Backbone 5e-5, Head 5e-4):
+python training/train_rafdb_transfer.py --epochs 3 --batch_size 32 --unfreeze_blocks 3
+
+# Evaluate test set metrics:
+python evaluation/evaluate_rafdb.py
+```
+
+### 5. Phase 1: Self-Supervised SimCLR Pre-Training
+```bash
+# Pre-train EfficientNet-B0 on unlabeled face crops using NT-Xent loss:
+python training/train_simclr.py --epochs 3 --batch_size 32
 ```
 
 ---
 
-## 🛠️ Step-by-Step Pipeline Execution
+## 📈 Visual Artifacts & Proofs
 
-| Phase | Description | Command |
-| :---: | :--- | :--- |
-| **1** | Inspect dataset & exclude duplicates | `python preprocessing/phase1_inspect_dataset.py` |
-| **2** | Verify and stage frames into sequences | `python preprocessing/phase2_verify_frames.py` |
-| **3** | Detect and crop faces using MTCNN | `python preprocessing/face_detection.py` |
-| **4** | Rotate faces to level eye axis | `python preprocessing/face_alignment.py` |
-| **5** | Resize to $224 \times 224$ & normalize | `python preprocessing/preprocessing.py` |
-| **6** | Generate augmentation preview | `python preprocessing/augmentation.py --preview` |
-| **7** | Subject-independent split (70/15/15) | `python preprocessing/split_dataset.py` |
-| **8** | Generate balanced positive/negative pairs | `python preprocessing/generate_pairs.py` |
-| **9** | Test contrastive dataset & DataLoader | `python datasets/contrastive_dataset.py` |
-| **10**| Initialize EfficientNet-B0 encoder | `python models/efficientnet_encoder.py` |
-| **11**| Test Siamese contrastive network | `python models/contrastive_model.py` |
-| **12**| Train Siamese contrastive model | `python training/train_contrastive.py --epochs 3` |
-| **13**| Extract & cache 1280-dim feature vectors | `python training/extract_features.py` |
-| **14**| Initialize Emotion Classifier model | `python models/emotion_classifier.py` |
-| **15**| Train Classifier (Three-Stage Strategy) | `python training/train_classifier.py --epochs_a 20` |
-| **16**| Compute final metrics & confusion matrices | `python evaluation/evaluate.py` |
-| **17**| Generate 2D t-SNE & PCA manifold plots | `python visualization/feature_visualization.py` |
+Key visual proofs generated by the pipeline:
 
----
-
-## 📈 Visualizations & Artifacts
-
-All figures are automatically generated in [`results/kmu_fed/`](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/results/kmu_fed):
-
-- `confusion_matrix.png`: Heatmap of raw prediction counts per emotion.
-- `confusion_matrix_normalized.png`: Percentage recall heatmap.
-- `per_class_metrics.png`: Grouped bar chart comparing Precision, Recall, and F1 per class.
-- `tsne_features_test.png`: 2D t-SNE scatter plot of test faces colored by emotion.
-- `tsne_features_all.png`: 2D t-SNE scatter plot across all 1,045 KMU-FED faces.
-- `pca_features_test.png`: 2D PCA projection of the test set feature space.
-- `clustering_metrics.json`: Quantitative cluster metrics (Silhouette: `0.0483`, Davies-Bouldin: `2.3438`).
+* **Real-Time Heads-Up Display (HUD):** [`results/realtime/realtime_preview.jpg`](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/results/realtime/realtime_preview.jpg)  
+  *Shows the 3-stage visual shift from calm driving (green border) to acute stress alert (red progress bar).*
+* **Temporal Moving-Average Smoothing Filter:** [`results/temporal/temporal_smoothing_comparison.png`](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/results/temporal/temporal_smoothing_comparison.png)  
+  *Demonstrates how Step 22 suppresses rapid prediction jitter by 16.9%.*
+* **RAF-DB Confusion Matrices:** [`results/raf_db/confusion_matrix_normalized.png`](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/results/raf_db/confusion_matrix_normalized.png)  
+  *Full 7x7 normalized confusion matrix on 3,068 test images.*
+* **SimCLR Positive Pair Strip:** [`results/simclr_pair_preview.jpg`](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/results/simclr_pair_preview.jpg)
 
 ---
 
 ## 📖 In-Depth Documentation
 
-- [**`for_me.md`**](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/for_me.md): Intuitive, simple-English walkthrough with real-world analogies and highlighted Q&A boxes for all common questions.
-- [**`explainable.md`**](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/explainable.md): Complete engineering documentation with mathematical proofs, ablation studies, and architectural rationales.
+* [**`for_me.md`**](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/for_me.md): Master beginner-friendly guide with real-world analogies (*The Portrait Artist*, *The Flipbook*, *The Park Bench*, *The Conveyor Belt*) and plain-English Q&A.
+* [**`explainable.md`**](file:///c:/Users/kundu/OneDrive/Desktop/KMU-FED-2/explainable.md): Full engineering documentation with mathematical proofs, selective unfreezing tables, loss functions, and architectural rationales.

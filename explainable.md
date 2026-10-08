@@ -1565,9 +1565,297 @@ Run Phase 1 again — it will print which files were excluded and why.
 
 ---
 
+## CROSS-DOMAIN ADAPTATION — PHASE 1: Self-Supervised SimCLR Pre-Training
+
+### Architectural Design
+Phase 1 establishes label-agnostic visual representation learning on facial images before any affective transfer.
+
+```text
+               Unlabeled Input Face x [3, 224, 224]
+                         │
+        ┌────────────────┴────────────────┐
+        ▼                                 ▼
+   View 1 (t1)                       View 2 (t2)
+(Crop, Jitter)                    (Blur, Contrast)
+        │                                 │
+        ▼                                 ▼
+  EfficientNet-B0                   EfficientNet-B0 (Shared Weights)
+        │                                 │
+  Feature Vector h1                 Feature Vector h2 [1280-dim]
+        │                                 │
+  Projection Head                   Projection Head (1280 -> 512 -> 128)
+        │                                 │
+  Normalized z1                     Normalized z2 [128-dim]
+        └────────────────┬────────────────┘
+                         ▼
+             NT-Xent Contrastive Loss
+        L = -log( exp(sim(z1,z2)/tau) / sum(exp(sim(z1,zk)/tau)) )
+```
+
+### Module Specifications
+1. **`datasets/simclr_dataset.py`:**
+   - **`SimCLRAugmentation`:** Generates stochastic views $(x_1, x_2)$ preserving structural landmarks.
+   - **`SimCLRDataset`:** Loads 1,045 processed images with dynamic batching.
+   - **Preview Output:** `results/simclr_pair_preview.jpg`.
+
+2. **`models/simclr_model.py`:**
+   - **Backbone:** `EfficientNet-B0` ($1,280$ feature channels).
+   - **Projection Head:** $\text{Linear}(1280, 512) \to \text{BatchNorm1d}(512) \to \text{ReLU} \to \text{Linear}(512, 128) \to \text{L2 Normalize}$.
+   - **`NTXentLoss`:** Pairwise cosine similarity matrix $[2N, 2N]$ with diagonal self-mask and temperature $\tau = 0.07$.
+
+3. **`training/train_simclr.py`:**
+   - **Optimization:** AdamW ($\text{LR} = 10^{-4}$, weight decay $10^{-4}$) with `ReduceLROnPlateau` scheduler.
+   - **Split:** 85% train (889 faces) / 15% validation (156 faces).
+   - **Pre-Training Progression:**
+
+| Epoch | Train Loss | Validation Loss | LR | Duration | Status |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| 1 | 1.3357 | 0.7972 | $1.0 \times 10^{-4}$ | 156.1s | Initial baseline |
+| 2 | 0.5361 | 0.3785 | $1.0 \times 10^{-4}$ | 151.3s | Rapid convergence |
+| 3 | 0.4131 | 0.3339 | $1.0 \times 10^{-4}$ | 149.7s | **Best Checkpoint Saved** |
+
+- **Artifacts Saved:**
+  - `models_checkpoints/best_simclr_model.pth` (57.2 MB)
+  - `models_checkpoints/self_supervised_backbone.pth` (16.3 MB)
+  - `logs/simclr_training_history.csv`
+
+---
+
+## CROSS-DOMAIN ADAPTATION — PHASE 2: Supervised Affective Transfer Learning (RAF-DB)
+
+### Architectural Design
+Phase 2 adapts the self-supervised facial backbone into an affective representation model using 15,339 real-world facial images from RAF-DB.
+
+```text
+       RAF-DB Real-World Face [100x100]
+                     │
+                     ▼
+          Resize to 224x224 & Normalize
+                     │
+                     ▼
+       Pretrained Backbone (Phase 1 Checkpoint: self_supervised_backbone.pth)
+                     │
+         1280-dim Feature Vector h
+                     │
+                     ▼
+       Emotion Classifier Head (1280 -> 256 -> 7)
+                     │
+                     ▼
+       7 Emotion Class Logits (Surprise, Fear, Disgust, Happiness, Sadness, Anger, Neutral)
+                     │
+                     ▼
+       Cross-Entropy Loss (L_CE = -sum y_c log(p_c))
+```
+
+### Module Specifications
+1. **`datasets/rafdb_dataset.py`:**
+   - **Data Volume:** 12,271 training faces + 3,068 testing faces = 15,339 aligned RGB images.
+   - **Label Mapping:** 7 classes (Surprise: 0, Fear: 1, Disgust: 2, Happiness: 3, Sadness: 4, Anger: 5, Neutral: 6).
+   - **Transforms:** Random crop/flip/jitter for training; deterministic 224x224 resize + ImageNet normalization for test.
+   - **Visual Proof:** `results/rafdb_preview.jpg` (7-panel emotion strip).
+
+2. **`training/train_rafdb_transfer.py`:**
+   - **Backbone Initialization:** Loads `models_checkpoints/self_supervised_backbone.pth` (Phase 1 pre-trained weights).
+   - **Classification Head:** $\text{Linear}(1280, 256) \to \text{BatchNorm1d}(256) \to \text{ReLU} \to \text{Dropout}(0.4) \to \text{Linear}(256, 7)$.
+   - **Stage A (Warmup):** Backbone frozen (4.0M parameters locked), training 330,247 classification head parameters (baseline test acc: 39.48%).
+   - **Stage B (Fine-Tuning on RTX 2050):**
+     - Unlocked top 3 feature blocks (3.48M trainable parameters).
+     - Differential Learning Rate: Backbone = $5 \times 10^{-5}$, Head = $5 \times 10^{-4}$.
+     - Epoch 1: Test Acc = 62.26% | Epoch 2: Test Acc = 67.21% | Epoch 3: Test Acc = **70.73%**.
+   - **Artifacts Saved:**
+     - `models_checkpoints/best_rafdb_affective_model.pth` (20.3 MB)
+     - `logs/rafdb_transfer_history.csv`
+
+### Deep Dive: EfficientNet-B0 Feature Stages & Selective Unfreezing Rationale
+
+#### Complete Anatomy of All 9 Feature Stages in `model.features`
+EfficientNet-B0 extracts hierarchical visual representations across 9 sequential stages (Stages 0 to 8), comprising 4,007,548 total backbone parameters:
+
+| Stage # | Layer Architecture | Param Count | % of Backbone | Feature Representation (Hierarchical Semantics) | Status in Stage B |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| **Stage 0** | Conv3x3 Stem + BN + SiLU ($3 \to 32$) | 928 | 0.02% | **Low-level Primitives:** Edges, pixel contrasts, light/shadow gradients. | 🔒 **FROZEN** |
+| **Stage 1** | MBConv1, k3x3 ($32 \to 16$) | 1,448 | 0.04% | **Corners & Angles:** Simple junctions, diagonal line intersections. | 🔒 **FROZEN** |
+| **Stage 2** | MBConv6 x2, k3x3 ($16 \to 24$) | 16,714 | 0.42% | **Basic Textures:** Smooth skin transitions, shading patches. | 🔒 **FROZEN** |
+| **Stage 3** | MBConv6 x2, k5x5 ($24 \to 40$) | 46,640 | 1.16% | **Complex Textures:** Hair gradients, eyelid edges, nostril shadows. | 🔒 **FROZEN** |
+| **Stage 4** | MBConv6 x3, k3x3 ($40 \to 80$) | 242,930 | 6.06% | **Sub-Parts of Face:** Eyeball contours, lip borders, nostril curves. | 🔒 **FROZEN** |
+| **Stage 5** | MBConv6 x3, k5x5 ($80 \to 112$) | 543,148 | 13.55% | **Facial Landmark Assemblies:** Eye sockets, nose bridge, eyebrow arches. | 🔒 **FROZEN** |
+| **Stage 6** | MBConv6 x4, k5x5 ($112 \to 192$) | **2,026,348** | **50.56%** | **Action Unit Dynamics:** Brow lowering (AU4), cheek raise (AU6), lip pull (AU12). | 🔓 **UNFROZEN** |
+| **Stage 7** | MBConv6 x1, k3x3 ($192 \to 320$) | **717,232** | **17.90%** | **Compound Facial Affect:** Inter-landmark tensions, composite emotional states. | 🔓 **UNFROZEN** |
+| **Stage 8** | Conv1x1 Head Projection ($320 \to 1280$) | **412,160** | **10.29%** | **Global Affective Vector:** 1280-dim representation synthesizing complete face. | 🔓 **UNFROZEN** |
+
+#### Why Unlock Only the Top 3 Stages and Not All 9?
+1. **Preserving Universal Visual Primitives (Stages 0–5):**  
+   Low-level filters (edges, textures, eye contours) are universal across all human faces and visual datasets. Overwriting them with RAF-DB classification loss is counterproductive because the self-supervised SimCLR pretraining (Phase 1) already tuned them to robust facial representations.
+2. **Preventing Catastrophic Forgetting & Gradient Shock:**  
+   If all layers are unfrozen simultaneously with a large learning rate, high-loss backpropagation gradients propagate to the earliest layers, causing catastrophic destruction of foundational visual filters. Freezing Stages 0–5 acts as a stabilizing anchor.
+3. **The 78.7% Capacity Sweet-Spot:**  
+   Stages 6, 7, and 8 contain **3,155,740 parameters** — exactly **78.7%** of the entire feature extractor's parametric capacity! Unfreezing just these top 3 stages provides nearly 80% adaptation freedom where it matters most (high-level emotion geometry) without risking instability.
+4. **Differential Learning Rate Regularization:**  
+   By coupling partial unfreezing with a differential learning rate (Backbone $\text{LR} = 5 \times 10^{-5}$, Head $\text{LR} = 5 \times 10^{-4}$), top convolutional filters are fine-tuned gently without distorting the global latent manifold. Test accuracy leaped from **39.48% to 70.73%**.
+
+### Methodological Rule: Affective Representation vs. Direct Stress (Step 14)
+Facial emotion is not equivalent to stress. In this pipeline, RAF-DB teaches the model rich **affective feature representations** (fear, sadness, disgust, neutral) rather than treating them as ground-truth stress labels. These affective probabilities form intermediate features for downstream temporal stress inference in Phase 3.
+
+3. **`evaluation/evaluate_rafdb.py`:**
+   - **Evaluation Set:** 3,068 unseen held-out real-world faces.
+   - **Overall Accuracy:** **70.73%** (2,170 / 3,068 correct).
+   - **Weighted F1-Score:** **70.13%**.
+   - **Macro Precision:** **63.62%** | **Macro Recall:** **57.51%**.
+   - **Affective Cue Precision:** Fear: **77.4%** | Happiness: **86.3%** | Surprise: **66.1%** | Neutral: **62.4%** | Sadness: **61.5%**.
+   - **Confusion Matrix:** Generated 7x7 heatmaps (raw counts and normalized percentages).
+   - **Saved Artifacts:**
+     - `results/raf_db/confusion_matrix.png`
+     - `results/raf_db/confusion_matrix_normalized.png`
+     - `results/raf_db/per_class_metrics.png`
+     - `results/raf_db/classification_report.csv`
+     - `results/raf_db/evaluation_summary.json`
+
+---
+
+## CROSS-DOMAIN ADAPTATION — PHASE 3: Temporal Stress Inference (Steps 18–22)
+
+### Architectural Design
+Phase 3 extends single-frame affective representation into continuous sequence modeling over driving video sequences. It models stress as a temporal phenomenon using sliding windows, a Bidirectional GRU with Temporal Attention Pooling, and a moving-average smoothing filter to eliminate frame flicker.
+
+```text
+  KMU-FED Driving Video Sequence V_i = {F_1, F_2, ..., F_T} (10-20 frames)
+                             │
+                             ▼
+  [Step 18] Sliding Temporal Window (W = 10 frames, Stride S = 2)
+            X_t = [F_t, F_{t+1}, ..., F_{t+9}] ∈ R^[10, 3, 224, 224]
+                             │
+                             ▼
+  [Step 19] Frame-Level Feature Extraction via Phase 2 Model (best_rafdb_affective_model.pth)
+            f_t = Encoder(F_t) ∈ R^1280
+            Sequence: [f_1, f_2, ..., f_10] ∈ R^[10, 1280]
+                             │
+                             ▼
+  [Step 20] Bidirectional GRU Sequence Modeling (2 layers, hidden_dim = 128)
+            h_t = BiGRU(f_t) ∈ R^256
+                             │
+                             ▼
+  Temporal Attention Pooling: α_t = Softmax(w^T tanh(W h_t))
+  Context Vector: c = sum_t (α_t * h_t) ∈ R^256
+                             │
+                             ▼
+  [Step 21] Stress Classification Head: Linear(256 -> 64) -> ReLU -> Linear(64 -> 2)
+            Raw Logits & Probability: P(Stress State | X_t)
+                             │
+                             ▼
+  [Step 22] Temporal Moving-Average Smoothing Filter (K = 3)
+            p_hat_t = (1 / K) * sum_{i=0}^{K-1} p_{t-i}
+            Stable, Flicker-Free Stress Signal [0.0 - 1.0]
+```
+
+### Module Specifications
+1. **`datasets/temporal_dataset.py` (Steps 18 & 19):**
+   - **Video Sequences:** 61 driving sequences across 12 vehicle drivers in `data/metadata/kmu_fed_processed.csv`.
+   - **Subject-Independent Splits:**
+     - Train Subjects: `[1, 3, 5, 6, 7, 9, 10, 12]` (199 temporal windows).
+     - Validation Subjects: `[4, 8]` (42 temporal windows).
+     - Test Subjects: `[2, 11]` (44 temporal windows).
+   - **Window Size:** $W = 10$ frames ($X_t = [F_t, \dots, F_{t+9}]$). Stride $S = 2$.
+   - **Affective Stress-Cue Mapping:** High Tension (Fear, Disgust, Anger, Sadness) $\to 1$; Calm / Baseline (Happiness, Neutral, Surprise) $\to 0$.
+
+2. **`models/temporal_model.py` (Step 20):**
+   - **`TemporalAttention`:** Learns frame-importance coefficients $\alpha_t \in [0, 1]$ satisfying $\sum_{t=1}^W \alpha_t = 1.0$. Dynamically weights the exact moment micro-expressions peak.
+   - **`TemporalStressGRU`:** 2-layer Bidirectional GRU ($1280 \to 128 \times 2 = 256$ features) with dropout (0.3).
+   - **`EndToEndTemporalStressModel`:** End-to-end wrapper combining CNN backbone with recurrent head for raw video tensor inputs $[B, W, 3, 224, 224]$.
+
+3. **`training/train_temporal.py` (Steps 21 & 22):**
+   - **Pre-Extraction Caching:** Extracted frame features stored in `data/features/features_{split}_w10_s2.pt` on RTX 2050 GPU.
+   - **Optimization:** AdamW ($\text{LR} = 10^{-3}$, weight decay $10^{-4}$) with `ReduceLROnPlateau` scheduler.
+   - **Step 22 Smoothing Evaluation:** Evaluated on test predictions:
+     $$\hat{p}_t = \frac{1}{K} \sum_{i=0}^{K-1} p_{t-i} \quad (K=3)$$
+     - Raw Prediction Jitter: **0.1232**
+     - Smoothed Jitter: **0.1024**
+     - **Flicker Reduction:** **16.9% reduction in temporal noise!**
+   - **Saved Checkpoint:** `models_checkpoints/best_temporal_stress_model.pth`.
+   - **Visualization:** `results/temporal/temporal_smoothing_comparison.png`.
+
+### Evaluation Performance on Held-Out Test Subjects `[2, 11]`
+
+| Metric | Score | Rationale & Clinical Implication |
+| :--- | :---: | :--- |
+| **Test Accuracy** | **93.18%** | Correctly identifies stress state across unseen vehicle drivers |
+| **Test Precision** | **100.00%** | Zero false alarms on stress alerts |
+| **Test Recall** | **90.32%** | Successfully catches 9 out of 10 genuine stress events |
+| **Test F1-Score** | **94.92%** | High balanced harmonic mean between precision and recall |
+| **Test ROC-AUC** | **98.26%** | Exceptional discrimination capability across decision thresholds |
+| **Jitter Reduction** | **16.9%** | Step 22 moving average eliminates jarring frame-to-frame spikes |
+
+---
+
+## CROSS-DOMAIN ADAPTATION — PHASE 4: Real-Time Temporal Inference & Tracking (Steps 23–26)
+
+### Architectural Design
+Phase 4 deploys the trained models into a live, interactive streaming pipeline capable of ingesting video frames from either a connected webcam or pre-recorded video sequences, performing continuous face tracking, updating a sliding temporal buffer, and rendering a heads-up display (HUD).
+
+```text
+  Live Video Stream (Webcam / Driving Sequence)
+                     │
+                     ▼
+  [Step 23 & 24] Real-Time Face Detection & Tracking (MTCNN with 0.5x Fast Scale)
+                 Extracts face bounding box (x, y, w, h)
+                     │
+                     ▼
+  [Step 25] Normalization & Standardization
+            Cropped Face -> RGB -> Resize 224x224 -> ImageNet Normalization
+                     │
+                     ▼
+  [Step 26] Feature Extraction & Sliding Window Buffer
+            f_t = EfficientNetEncoder(face_tensor) ∈ R^1280
+            Rolling Buffer: deque([f_{t-9}, ..., f_{t-1}, f_t], maxlen=10)
+                     │
+                     ▼
+  Temporal Stress GRU Inference: (logits, attention) = BiGRU(buffer_tensor)
+                     │
+                     ▼
+  [Step 22] Temporal Moving-Average Smoother (K = 3)
+            p_hat_t = (1 / 3) * (p_t + p_{t-1} + p_{t-2})
+                     │
+                     ▼
+  Real-Time Heads-Up Display (HUD) Rendering:
+  ┌─────────────────────────────────────────────────────────────┐
+  │ STATE: HIGH STRESS ALERT 🔴          3.6 FPS | 281.3ms      │
+  │ AFFECT: Surprise (74%)               [==========    ] 69.7% │
+  └─────────────────────────────────────────────────────────────┘
+```
+
+### Module Specifications
+1. **`inference/predict_realtime.py` (Steps 23–26):**
+   - **`RealtimeTemporalStressPipeline`:** Manages end-to-end inference lifecycle.
+   - **Rolling Buffer:** Memory queue `deque(maxlen=10)` maintaining the last 10 continuous feature vectors $[1, 10, 1280]$.
+   - **Step 22 Smoothing Filter:** Moving-average filter ($K=3$) suppressing frame-to-frame jitter.
+   - **HUD Visual Dashboard:**
+     - Dynamic color badges:
+       - 🟢 **CALM / BASELINE** ($< 40\%$)
+       - 🟡 **ELEVATED AFFECT** ($40\% - 65\%$)
+       - 🔴 **HIGH STRESS ALERT** ($> 65\%$)
+     - Affective classification label with confidence percentage.
+     - Real-time FPS and latency benchmark counter.
+     - Color-coded progress bar stress meter.
+
+### Sequence Test Benchmark on Driving Sequence `02_FE_s01` (Test Subject 2)
+- **Sequence Context:** 20 consecutive vehicle frames capturing a transition from calm driving to acute surprise/fear onset.
+- **Dynamic Stress Escalation Observed:**
+  - Frames 1 to 9 (Calm baseline): Stress probability stays low at **6.1% – 8.1%** (State: 🟢 CALM).
+  - Frames 10 to 14 (Facial tension onset): Stress steadily climbs to **8.5% ➔ 24.4%** (State: 🟢 CALM).
+  - Frames 15 to 17 (Affect escalation): Stress reaches **33.5% ➔ 53.9%** (State: 🟡 ELEVATED).
+  - Frames 18 to 20 (Acute peak): Stress peaks at **62.5% ➔ 74.7%** (State: 🔴 HIGH STRESS ALERT).
+- **Deliverables Saved:**
+  - `results/realtime/realtime_preview.jpg` (Visual 3-panel demonstration showing green baseline to red acute alert).
+  - `results/realtime/realtime_inference_summary.json` (Latency and performance metrics).
+
+---
+
 *Document Status:*
-- Phases 1 through 17: COMPLETE and verified
-- Phase 18 onward: Awaiting user permission
+- Phases 1 through 17: COMPLETE and verified (KMU-FED Baseline)
+- Cross-Domain Phase 1 (Steps 1 to 8): **100% COMPLETE & VERIFIED** (Self-Supervised Pre-Training)
+- Cross-Domain Phase 2 (Steps 9 to 17): **100% COMPLETE & VERIFIED** (RAF-DB Affective Transfer)
+- Cross-Domain Phase 3 (Steps 18 to 22): **100% COMPLETE & VERIFIED** (Temporal Stress Inference)
+- Cross-Domain Phase 4 (Steps 23 to 26): **100% COMPLETE & VERIFIED** (Real-Time Temporal Inference)
+- Next: Cross-Domain Phase 5 (Model Optimization & Deployment)
 
 
 

@@ -1,0 +1,8 @@
+{
+    "overall_accuracy_pct": 70.73,
+    "macro_precision_pct": 63.62,
+    "macro_recall_pct": 57.51,
+    "macro_f1_pct": 58.68,
+    "total_test_samples": 3068,
+    "correct_predictions": 2170
+}
