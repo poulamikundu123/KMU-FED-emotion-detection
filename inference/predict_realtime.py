@@ -95,19 +95,19 @@ class RealtimeTemporalStressPipeline:
             transforms.Normalize(mean=config.IMAGENET_MEAN, std=config.IMAGENET_STD)
         ])
 
-        # 5. Face Detector (MTCNN with robust fallback)
+        # 5. Face Detector (MediaPipe BlazeFace with robust fallback)
         try:
-            from mtcnn import MTCNN
-            self.detector = MTCNN()
-            print("[Face Detector] MTCNN initialized successfully.")
+            from preprocessing.mediapipe_face_detector import MediaPipeFaceDetector
+            self.detector = MediaPipeFaceDetector()
+            print("[Face Detector] MediaPipe BlazeFace initialized successfully.")
         except Exception as e:
-            print(f"[Face Detector] MTCNN unavailable ({e}), using center-face tracker.")
+            print(f"[Face Detector] MediaPipe unavailable ({e}), using center-face tracker.")
             self.detector = None
 
         print(f"[Pipeline] Initialized on {self.device} (Buffer={window_size}, SmoothK={smooth_k})")
 
     def detect_face(self, frame_bgr):
-        """Detects the primary face bounding box (x, y, w, h) via MTCNN or crop heuristic."""
+        """Detects the primary face bounding box (x, y, w, h) via MediaPipe or crop heuristic."""
         h, w = frame_bgr.shape[:2]
 
         # If already cropped face (square-ish and standard size), return full frame
@@ -117,18 +117,9 @@ class RealtimeTemporalStressPipeline:
         if self.detector is not None:
             try:
                 rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                # Fast 0.5x scaling
-                small_rgb = cv2.resize(rgb, (w // 2, h // 2))
-                detections = self.detector.detect_faces(small_rgb)
-                scale = 2.0
-                if not detections:
-                    detections = self.detector.detect_faces(rgb)
-                    scale = 1.0
-
-                if detections:
-                    best = max(detections, key=lambda d: d["box"][2] * d["box"][3])
+                best = self.detector.detect_primary_face(rgb)
+                if best is not None:
                     bx, by, bw, bh = best["box"]
-                    bx, by, bw, bh = int(bx * scale), int(by * scale), int(bw * scale), int(bh * scale)
                     return (max(0, bx), max(0, by), bw, bh), True
             except Exception:
                 pass

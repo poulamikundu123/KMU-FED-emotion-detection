@@ -1,4 +1,4 @@
-﻿"""
+"""
 config.py — Central configuration for the KMU-FED pipeline.
 All paths, constants, and hyperparameters live here.
 """
@@ -37,6 +37,10 @@ ALIGNMENT_FAILURES_CSV      = os.path.join(LOGS_DIR, "alignment_failures.csv")
 # --- Features and checkpoints ---
 FEATURES_DIR    = os.path.join(PROJECT_ROOT, "features")
 CHECKPOINTS_DIR = os.path.join(PROJECT_ROOT, "models_checkpoints")
+
+# --- Face Detection (MediaPipe BlazeFace) ---
+MEDIAPIPE_MODEL_PATH     = os.path.join(CHECKPOINTS_DIR, "blaze_face_short_range.tflite")
+MEDIAPIPE_MIN_CONFIDENCE = 0.50
 
 # --- Results ---
 RESULTS_DIR     = os.path.join(PROJECT_ROOT, "results")

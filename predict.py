@@ -82,13 +82,13 @@ def load_model(device="cpu"):
 
 def detect_align_and_crop_face(pil_img, align=True, match_domain=False, margin_ratio=0.10):
     """
-    Detect primary face region with MTCNN, optionally apply Phase 4 affine
+    Detect primary face region with MediaPipe BlazeFace, optionally apply Phase 4 affine
     eye alignment (leveling eye axis to horizontal), and optionally apply
     NIR domain adaptation for webcam photos.
     """
     try:
-        from mtcnn import MTCNN  # type: ignore
-        detector = MTCNN()
+        from preprocessing.mediapipe_face_detector import MediaPipeFaceDetector
+        detector = MediaPipeFaceDetector()
         img_np = np.array(pil_img.convert("RGB"))
         detections = detector.detect_faces(img_np)
         if detections:
@@ -113,6 +113,8 @@ def detect_align_and_crop_face(pil_img, align=True, match_domain=False, margin_r
                 if re_det:
                     best = max(re_det, key=lambda d: d["box"][2] * d["box"][3])
                     bx, by, bw, bh = best["box"]
+
+            detector.close()
 
             h, w = img_np.shape[:2]
             pad_w = int(bw * margin_ratio)
@@ -225,7 +227,7 @@ def annotate_and_save(result, output_path="results/prediction_annotated.jpg"):
 def main():
     parser = argparse.ArgumentParser(description="Predict facial emotion on any image")
     parser.add_argument("--image", type=str, default=None, help="Path to input face image")
-    parser.add_argument("--no_crop", action="store_true", help="Disable automatic MTCNN face cropping")
+    parser.add_argument("--no_crop", action="store_true", help="Disable automatic MediaPipe face cropping")
     parser.add_argument("--no_align", action="store_true", help="Disable Phase 4 affine eye alignment")
     parser.add_argument("--domain_match", "--gray", action="store_true", help="Apply monochrome NIR domain adaptation for webcam photos")
     parser.add_argument("--save_annotated", action="store_true", help="Save image with prediction banner")

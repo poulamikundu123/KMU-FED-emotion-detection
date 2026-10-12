@@ -1,6 +1,6 @@
 """
 preprocessing/face_detection.py
-Phase 3: Detect faces in staged frames using MTCNN, crop face regions,
+Phase 3: Detect faces in staged frames using MediaPipe BlazeFace, crop face regions,
 and save outputs to data/detected_faces/ with failure tracking.
 See explainable.md > Phase 3 for details.
 """
@@ -11,40 +11,34 @@ import cv2
 import pandas as pd
 import numpy as np
 
-# Suppress TensorFlow logging noise
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
-from mtcnn import MTCNN  # type: ignore
-
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
+from preprocessing.mediapipe_face_detector import MediaPipeFaceDetector
 
 
 def detect_face_in_image(detector, img_rgb):
-    """Detect primary face using fast 0.5x scaling with full-res fallback."""
+    """Detect primary face using MediaPipe with full-res and fast downscaled fallback."""
+    result = detector.detect_primary_face(img_rgb)
+    if result is not None:
+        return result
+
+    # Fallback to downscaled image if full-res did not return a detection
     h, w = img_rgb.shape[:2]
     small_rgb = cv2.resize(img_rgb, (w // 2, h // 2))
-    detections = detector.detect_faces(small_rgb)
-
-    scale = 2.0
-    if not detections:
-        # Fallback to full resolution if downscaled check missed
-        detections = detector.detect_faces(img_rgb)
-        scale = 1.0
-
-    if not detections:
+    small_result = detector.detect_primary_face(small_rgb)
+    if small_result is None:
         return None
 
-    # Select face with highest confidence / largest area
-    best = max(detections, key=lambda d: d["confidence"] * (d["box"][2] * d["box"][3]))
-    bx, by, bw, bh = best["box"]
+    # Scale coordinates back to full resolution
+    bx, by, bw, bh = small_result["box"]
+    bx, by, bw, bh = bx * 2, by * 2, bw * 2, bh * 2
+    keypoints = {k: (v[0] * 2, v[1] * 2) for k, v in small_result["keypoints"].items()}
 
-    # Scale back to full resolution
-    bx, by, bw, bh = int(bx * scale), int(by * scale), int(bw * scale), int(bh * scale)
-    conf = float(best["confidence"])
-    keypoints = {k: (int(v[0] * scale), int(v[1] * scale)) for k, v in best["keypoints"].items()}
-
-    return {"box": (bx, by, bw, bh), "confidence": conf, "keypoints": keypoints}
+    return {
+        "box": (bx, by, bw, bh),
+        "confidence": small_result["confidence"],
+        "keypoints": keypoints
+    }
 
 
 def crop_face_with_margin(img, box, margin_ratio=0.10):
@@ -65,7 +59,7 @@ def crop_face_with_margin(img, box, margin_ratio=0.10):
 
 def run_phase3():
     print("=" * 55)
-    print("  KMU-FED Phase 3 — Face Detection")
+    print("  KMU-FED Phase 3 — MediaPipe Face Detection")
     print(f"  Input frames  : {config.FRAMES_DIR}")
     print(f"  Target faces  : {config.DETECTED_FACES_DIR}")
     print(f"  Failures log  : {config.FACE_DETECTION_FAILURES_CSV}")
@@ -78,83 +72,87 @@ def run_phase3():
     os.makedirs(config.DETECTED_FACES_DIR, exist_ok=True)
     os.makedirs(config.LOGS_DIR, exist_ok=True)
 
-    detector = MTCNN()
+    detector = MediaPipeFaceDetector(min_detection_confidence=config.MEDIAPIPE_MIN_CONFIDENCE)
 
     detection_records = []
     failures = []
 
     total_images = len(df)
-    for idx, row in df.iterrows():
-        filename = row["filename"]
-        seq_id = str(row["sequence_id"])
-        img_path = row["image_path"]
+    try:
+        for idx, row in df.iterrows():
+            filename = row["filename"]
+            seq_id = str(row["sequence_id"])
+            img_path = row["image_path"]
 
-        # Resolve path
-        if not os.path.exists(img_path):
-            img_path = os.path.join(config.FRAMES_DIR, seq_id, filename)
+            # Resolve path
+            if not os.path.exists(img_path):
+                img_path = os.path.join(config.FRAMES_DIR, seq_id, filename)
 
-        if not os.path.exists(img_path):
-            failures.append({
+            if not os.path.exists(img_path):
+                failures.append({
+                    "filename": filename,
+                    "image_path": img_path,
+                    "reason": "File not found"
+                })
+                continue
+
+            dest_dir = os.path.join(config.DETECTED_FACES_DIR, seq_id)
+            os.makedirs(dest_dir, exist_ok=True)
+            dest_path = os.path.join(dest_dir, filename)
+
+            img = cv2.imread(img_path)
+            if img is None:
+                failures.append({
+                    "filename": filename,
+                    "image_path": img_path,
+                    "reason": "cv2 failed to decode image"
+                })
+                continue
+
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            result = detect_face_in_image(detector, img_rgb)
+
+            if result is None or result["confidence"] < config.MEDIAPIPE_MIN_CONFIDENCE:
+                failures.append({
+                    "filename": filename,
+                    "image_path": img_path,
+                    "reason": f"No face detected (conf < {config.MEDIAPIPE_MIN_CONFIDENCE:.2f})"
+                })
+                continue
+
+            # Crop face and save
+            cropped, crop_box = crop_face_with_margin(img, result["box"], margin_ratio=0.10)
+            cv2.imwrite(dest_path, cropped)
+
+            kp = result["keypoints"]
+            detection_records.append({
+                "sequence_id": seq_id,
                 "filename": filename,
-                "image_path": img_path,
-                "reason": "File not found"
+                "subject_id": row["subject_id"],
+                "emotion": row["emotion"],
+                "detected_face_path": dest_path,
+                "confidence": result["confidence"],
+                "box_x": result["box"][0],
+                "box_y": result["box"][1],
+                "box_w": result["box"][2],
+                "box_h": result["box"][3],
+                "left_eye_x": kp["left_eye"][0],
+                "left_eye_y": kp["left_eye"][1],
+                "right_eye_x": kp["right_eye"][0],
+                "right_eye_y": kp["right_eye"][1],
+                "nose_x": kp["nose"][0],
+                "nose_y": kp["nose"][1],
+                "mouth_l_x": kp["mouth_left"][0],
+                "mouth_l_y": kp["mouth_left"][1],
+                "mouth_r_x": kp["mouth_right"][0],
+                "mouth_r_y": kp["mouth_right"][1],
             })
-            continue
 
-        dest_dir = os.path.join(config.DETECTED_FACES_DIR, seq_id)
-        os.makedirs(dest_dir, exist_ok=True)
-        dest_path = os.path.join(dest_dir, filename)
+            if (idx + 1) % 100 == 0 or (idx + 1) == total_images:
+                print(f"  Processed {idx + 1}/{total_images} images (Detected: {len(detection_records)}, Failures: {len(failures)})")
 
-        img = cv2.imread(img_path)
-        if img is None:
-            failures.append({
-                "filename": filename,
-                "image_path": img_path,
-                "reason": "cv2 failed to decode image"
-            })
-            continue
-
-        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        result = detect_face_in_image(detector, img_rgb)
-
-        if result is None or result["confidence"] < 0.80:
-            failures.append({
-                "filename": filename,
-                "image_path": img_path,
-                "reason": f"No face detected (conf < 0.80)"
-            })
-            continue
-
-        # Crop face and save
-        cropped, crop_box = crop_face_with_margin(img, result["box"], margin_ratio=0.10)
-        cv2.imwrite(dest_path, cropped)
-
-        kp = result["keypoints"]
-        detection_records.append({
-            "sequence_id": seq_id,
-            "filename": filename,
-            "subject_id": row["subject_id"],
-            "emotion": row["emotion"],
-            "detected_face_path": dest_path,
-            "confidence": result["confidence"],
-            "box_x": result["box"][0],
-            "box_y": result["box"][1],
-            "box_w": result["box"][2],
-            "box_h": result["box"][3],
-            "left_eye_x": kp["left_eye"][0],
-            "left_eye_y": kp["left_eye"][1],
-            "right_eye_x": kp["right_eye"][0],
-            "right_eye_y": kp["right_eye"][1],
-            "nose_x": kp["nose"][0],
-            "nose_y": kp["nose"][1],
-            "mouth_l_x": kp["mouth_left"][0],
-            "mouth_l_y": kp["mouth_left"][1],
-            "mouth_r_x": kp["mouth_right"][0],
-            "mouth_r_y": kp["mouth_right"][1],
-        })
-
-        if (idx + 1) % 100 == 0 or (idx + 1) == total_images:
-            print(f"  Processed {idx + 1}/{total_images} images (Detected: {len(detection_records)}, Failures: {len(failures)})")
+    finally:
+        detector.close()
 
     # Save failure log (always create CSV with header)
     fail_df = pd.DataFrame(failures, columns=["filename", "image_path", "reason"])
